@@ -142,6 +142,19 @@ foreach ($tasks as $task) {
             $pdo->prepare("UPDATE sys_sites SET status = 'active' WHERE domain = ?")->execute([$domain]);
             $msg = "Site $domain created.";
             $success = true;
+
+            // --- Auto-encolar SSL si la IP ya apunta aquí ---
+            $publicIP = getPublicIP();
+            if ($publicIP && checkExternalDNS($domain, $publicIP)) {
+                // Verificar si ya hay una tarea SSL pendiente para este dominio para no duplicar
+                $stmtSSL = $pdo->prepare("SELECT id FROM sys_tasks WHERE task_type = 'SSL_LETSENCRYPT' AND payload LIKE ? AND status = 'pending'");
+                $stmtSSL->execute(['%"domain": "' . $domain . '"%']);
+                if (!$stmtSSL->fetch()) {
+                    $sslPayload = json_encode(['domain' => $domain]);
+                    $pdo->prepare("INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SSL_LETSENCRYPT', ?, 'pending')")->execute([$sslPayload]);
+                    $msg .= " SSL task enqueued automatically (DNS OK).";
+                }
+            }
             break;
 
         case 'SSL_LETSENCRYPT':

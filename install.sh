@@ -273,6 +273,22 @@ mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_sites (
 );"
 mariadb -e "FLUSH PRIVILEGES;"
 
+# Crear primer sitio (el host principal)
+printf "${YELLOW}Configurando el sitio principal para $FULL_FQDN...${NC}\n"
+# El document_root por defecto será /var/www/html para el sitio principal
+MAIN_ROOT="/var/www/html"
+mkdir -p "$MAIN_ROOT"
+chown -R www-data:www-data "$MAIN_ROOT"
+
+# Insertar en base de datos
+mariadb -u root -p"$DB_ROOT_PASS" -D dbadmin -e "INSERT IGNORE INTO sys_sites (domain, document_root, php_enabled, status) VALUES ('$FULL_FQDN', '$MAIN_ROOT', 1, 'pending');"
+# Encolar creación del sitio
+PAYLOAD_CREATE="{\"domain\": \"$FULL_FQDN\", \"path\": \"$MAIN_ROOT\", \"php_enabled\": 1}"
+mariadb -u root -p"$DB_ROOT_PASS" -D dbadmin -e "INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SITE_CREATE', '$PAYLOAD_CREATE', 'pending');"
+# Encolar SSL (el motor verificará si la IP apunta antes de procesarlo)
+PAYLOAD_SSL="{\"domain\": \"$FULL_FQDN\"}"
+mariadb -u root -p"$DB_ROOT_PASS" -D dbadmin -e "INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SSL_LETSENCRYPT', '$PAYLOAD_SSL', 'pending');"
+
 # Eliminar credenciales temporales
 rm -f /root/.my.cnf
 
