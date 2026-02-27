@@ -20,10 +20,12 @@ El objetivo es crear un panel de control y sistema de instalación **extremedame
 - **Apache2 + MPM Event**: Configuración agresiva para bajo consumo (límites estrictos en `MaxRequestWorkers`).
 - **Aislamiento de PHP**: PHP desactivado globalmente en Apache. Solo se habilita explícitamente sitio por sitio o mediante handlers específicos.
 
-### 3. Entorno de Administración (Puerto 8080)
-- **VHost de Gestión**: Servidor independiente escuchando en el puerto 8080.
-- **Interfaz Web (index.php)**: Panel minimalista para el administrador que permite:
-  - Listar dominios existentes y su estado.
+- **Entorno de Administración (Puertos 8080/8090)**:
+  - **Puerto 8080**: Acceso vía **HTTP plano** (siempre sin SSL) para compatibilidad y configuración inicial.
+  - **Puerto 8090**: Acceso vía **HTTPS (SSL)**. El motor securiza este puerto automáticamente en cuanto el dominio principal obtiene su certificado Let's Encrypt.
+  - **Interfaz Web (index.php)**: Panel minimalista para el administrador que permite:
+  - Listar dominios existentes y su estado (Activo/Inactivo).
+  - Activar/Desactivar sitios (vía `a2ensite`/`a2dissite`).
   - Añadir nuevos dominios definiendo el `DocumentRoot` y activación de PHP.
 - **Base de Datos Dedicada**: Base de datos `dbadmin` con las siguientes tablas:
   - `sys_sites`: Registro maestro de los dominios instalados.
@@ -39,8 +41,10 @@ El sistema permite la creación y gestión de hosts virtuales de Apache:
 - **MariaDB**: Base de datos de administración y para usuarios.
 - **Certbot**: Gestión automatizada de certificados SSL vía Let's Encrypt.
 - **Aislamiento**: Cada sitio tiene su propio `DocumentRoot`.
-- **PHP**: Activación/desactivación de PHP por sitio.
+- **PHP Individual**: Activación/desactivación de PHP por sitio. Al desactivar PHP en un sitio, Apache deja de procesar archivos `.php` para ese dominio mediante la eliminación del `SetHandler` en su vhost, requiriendo un `reload`.
+- **Estado del Sitio**: Los sitios pueden marcarse como "Inactivos", lo que ejecuta `a2dissite` y un `reload` de Apache, deshabilitando el acceso por completo.
 - **SSL (Let's Encrypt)**: Soporte integrado para solicitar y configurar automáticamente certificados SSL gratuitos.
+  - **Puerto 8090 Seguro**: Al emitir el SSL para el dominio principal, el motor securiza automáticamente el puerto 8090 del panel de administración, manteniendo el puerto 8080 siempre en HTTP para evitar bloqueos por errores de protocolo.
   - **Pre-verificación DNS**: Validación mediante un resolver externo (Google 8.8.8.8) para asegurar la propagación antes de invocar Certbot, evitando fallos y rate-limits.
   - **Sincronización**: Los cambios en la configuración (ej. activar/desactivar PHP) se aplican automáticamente tanto al VirtualHost HTTP como al HTTPS (`-le-ssl.conf`).
   - **Ciclo de Vida**: Al eliminar un sitio, el sistema revoca y limpia automáticamente los certificados en Certbot.
@@ -66,13 +70,13 @@ El sistema permite la creación y gestión de hosts virtuales de Apache:
   - `innodb_buffer_pool_size = 128M`.
 
 ### 6. Seguridad
-- **Firewall**: `ufw` configurado con puertos 22 (SSH), 80 (HTTP), 443 (HTTPS) y 8080 (Admin).
+- **Firewall**: `ufw` configurado con puertos 22 (SSH), 80 (HTTP), 443 (HTTPS), 8080 (Admin HTTP) y 8090 (Admin HTTPS).
 - **Hardening DB**: Eliminación automática de usuarios anónimos, DB test y configuración de password segura para root.
 
 ## Roadmap Actualizado
 1. [x] Script de preparación de Debian (SWAP, Hostname, Limpieza).
 2. [x] Automatización de Apache2 (MPM Event) + PHP-FPM (OnDemand).
-3. [x] Panel de administración aislado en puerto 8080.
+3. [x] Panel de administración aislado en puerto 8080 y 8090 (SSL).
 4. [x] Instalación de Adminer integrada.
-5. [ ] Sistema de virtual host Web ligero(admin_panel)
+5. [x] Gestión de activación/desactivación de sitios (`a2ensite`/`a2dissite`).
 
