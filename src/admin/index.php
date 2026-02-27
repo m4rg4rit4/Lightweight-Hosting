@@ -1,10 +1,12 @@
 <?php
+session_start();
 require 'config.php';
 $pdo = getPDO();
-$msg = '';
 
 // Manejo de acciones POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $msg = '';
+    $msg_type = 'error';
     // 1. Crear nuevo sitio
     if (isset($_POST['domain'])) {
         $domain = filter_var($_POST['domain'], FILTER_SANITIZE_URL);
@@ -20,9 +22,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("INSERT INTO sys_tasks (task_type, payload) VALUES ('SITE_CREATE', ?)");
                 $stmt->execute([$payload]);
                 
-                $msg = "<p style='color:green'>Sitio '$domain' añadido a la cola de procesamiento.</p>";
+                $msg = "Sitio '$domain' añadido a la cola de procesamiento.";
+                $msg_type = 'success';
             } catch (Exception $e) {
-                $msg = "<p style='color:red'>Error: " . $e->getMessage() . "</p>";
+                $msg = "Error: " . $e->getMessage();
+                $msg_type = 'error';
             }
         }
     } 
@@ -59,11 +63,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($taskType) {
                 $stmt = $pdo->prepare("INSERT INTO sys_tasks (task_type, payload) VALUES (?, ?)");
                 $stmt->execute([$taskType, json_encode($payload)]);
-                $msg = "<p style='color:green'>Tarea de " . strtolower($action) . " para '" . $site['domain'] . "' encolada.</p>";
+                $msg = "Tarea de " . strtolower($action) . " para '" . $site['domain'] . "' encolada.";
+                $msg_type = 'success';
             }
         }
     }
+
+    if ($msg) {
+        $_SESSION['flash_msg'] = $msg;
+        $_SESSION['flash_type'] = $msg_type;
+    }
+    
+    header("Location: " . $_SERVER['PHP_SELF'] . (isset($_POST['domain']) ? '?new=1' : ''));
+    exit;
 }
+
+$msg = $_SESSION['flash_msg'] ?? '';
+$msg_type = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $sites = $pdo->query("
     SELECT s.*, 
@@ -212,6 +229,33 @@ $sites = $pdo->query("
             color: var(--text);
             letter-spacing: 0.02em;
         }
+
+        /* Form Toggle */
+        #new-site-form-container {
+            max-height: 0;
+            overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0;
+            margin-bottom: 0;
+        }
+        #new-site-form-container.show {
+            max-height: 500px;
+            opacity: 1;
+            margin-bottom: 40px;
+            padding: 24px;
+            background: rgba(79, 70, 229, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(79, 70, 229, 0.3);
+            box-shadow: 0 0 20px rgba(79, 70, 229, 0.1);
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 40px;
+            margin-bottom: 24px;
+        }
+        .section-header h1 { margin: 0; }
     </style>
 </head>
 <body>
@@ -226,26 +270,37 @@ $sites = $pdo->query("
                 <span class="pending-text">TAREAS PENDIENTES</span>
             </a>
         </nav>
-        
-        <h1>Añadir Nuevo Dominio</h1>
-        <?php if ($msg) { 
-            $type = strpos($msg, 'color:green') !== false ? 'success' : 'error';
-            echo "<div class='alert alert-$type'>" . strip_tags($msg) . "</div>";
-        } ?>
-        
-        <form method="POST">
-            <div class="form-group">
-                <label>Dominio (ej: misitio.com)</label>
-                <input type="text" name="domain" required placeholder="example.com">
-            </div>
-            <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
-                <input type="checkbox" name="php" id="php_enabled" checked style="width: 18px; height: 18px;">
-                <label for="php_enabled" style="margin-bottom: 0;">Habilitar soporte PHP</label>
-            </div>
-            <button type="submit" class="btn btn-primary">Crear Sitio</button>
-        </form>
 
-        <h1>Sitios Configurados</h1>
+        <?php if ($msg): ?>
+            <div class='alert alert-<?php echo $msg_type; ?>'>
+                <?php echo htmlspecialchars($msg); ?>
+            </div>
+        <?php endif; ?>
+        
+        <div class="section-header">
+            <h1>Sitios Configurados</h1>
+            <button onclick="toggleNewSiteForm()" class="btn btn-primary" id="toggle-btn">
+                <span style="font-size: 1.2rem; margin-right: 8px;">+</span> Nuevo Sitio
+            </button>
+        </div>
+
+        <div id="new-site-form-container" class="<?php echo isset($_GET['new']) ? 'show' : ''; ?>">
+            <h2 style="margin-top: 0; font-size: 1.2rem; margin-bottom: 20px; color: var(--primary);">Añadir Nuevo Dominio</h2>
+            
+            <form method="POST">
+                <div class="form-group">
+                    <label>Dominio (ej: misitio.com)</label>
+                    <input type="text" name="domain" required placeholder="example.com">
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" name="php" id="php_enabled" checked style="width: 18px; height: 18px;">
+                    <label for="php_enabled" style="margin-bottom: 0;">Habilitar soporte PHP</label>
+                </div>
+                <button type="submit" class="btn btn-primary">Crear Sitio</button>
+                <button type="button" onclick="toggleNewSiteForm()" class="btn btn-outline" style="margin-left: 10px;">Cancelar</button>
+            </form>
+        </div>
+
         <table>
             <thead>
                 <tr>
@@ -331,6 +386,35 @@ $sites = $pdo->query("
     <script>
         let lastPendingCount = -1;
 
+        function toggleNewSiteForm() {
+            const container = document.getElementById('new-site-form-container');
+            const toggleBtn = document.getElementById('toggle-btn');
+            
+            container.classList.toggle('show');
+
+            if (container.classList.contains('show')) {
+                toggleBtn.innerHTML = '<span style="font-size: 1.2rem; margin-right: 8px;">−</span> Cancelar';
+                toggleBtn.classList.remove('btn-primary');
+                toggleBtn.classList.add('btn-outline');
+                setTimeout(() => {
+                    container.querySelector('input[name="domain"]').focus();
+                }, 100);
+            } else {
+                toggleBtn.innerHTML = '<span style="font-size: 1.2rem; margin-right: 8px;">+</span> Nuevo Sitio';
+                toggleBtn.classList.remove('btn-outline');
+                toggleBtn.classList.add('btn-primary');
+            }
+        }
+
+        // Check if the form should be shown initially due to a message
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('new-site-form-container');
+            const toggleBtn = document.getElementById('toggle-btn');
+            if (container.classList.contains('show')) {
+                toggleBtn.innerHTML = '<span style="font-size: 1.2rem; margin-right: 8px;">−</span> Cancelar';
+            }
+        });
+
         async function checkTasks() {
             try {
                 const response = await fetch('tasks_status.php?t=' + Date.now());
@@ -346,9 +430,9 @@ $sites = $pdo->query("
                     notification.style.display = 'none';
                 }
 
-                // Si antes había tareas y ahora no, refrescamos para mostrar los cambios
+                // Si antes había tareas y ahora no, refrescamos con un GET limpio para mostrar los cambios
                 if (lastPendingCount > 0 && currentCount === 0) {
-                    location.reload();
+                    window.location.href = window.location.pathname;
                 }
                 
                 lastPendingCount = currentCount;

@@ -8,6 +8,8 @@ Un sistema de hosting ultra-ligero diseñado para hardware extremadamente limita
 - **MariaDB Low Memory Profile**: Desactivación de Performance Schema y optimización de buffers.
 - **Arquitectura Segura**: El panel web solo escribe en base de datos. Un motor de tareas ejecutado por root procesa los cambios vía Cron.
 - **Aislamiento**: Cada sitio puede tener su propia configuración (PHP, SSL via Let's Encrypt).
+- **Gestión de Estados**: Posibilidad de activar/desactivar sitios completos y soporte individual para PHP.
+- **Doble Panel Admin**: Acceso vía puerto 8080 (HTTP) y 8090 (HTTPS) securizado automáticamente.
 
 ## 📋 Requisitos de Hardware
 - **CPU**: 1 vCore (Prioridad en eficiencia).
