@@ -320,7 +320,9 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
 
         async function checkTasks() {
             try {
-                const response = await fetch('tasks_status.php');
+                const response = await fetch('tasks_status.php?t=' + Date.now());
+                if (!response.ok) throw new Error('Network response was not ok');
+                
                 const data = await response.json();
                 const currentCount = data.pending_count;
 
