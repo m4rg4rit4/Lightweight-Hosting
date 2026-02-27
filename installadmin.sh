@@ -16,19 +16,29 @@ ENGINE_PATH="/usr/local/bin/hosting"
 
 printf "${YELLOW}Actualizando archivos desde GitHub...${NC}\n"
 
-# 1. Actualizar Panel de Administración
-printf "${YELLOW}Actualizando interfaz (protegiendo config.php)...${NC}\n"
-mkdir -p $ADMIN_PATH
-curl -sSL "$REPO_RAW/src/admin/index.php" -o "$ADMIN_PATH/index.php"
-curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$ADMIN_PATH/config.php.template"
-printf "${GREEN}- Interfaz de administración actualizada en $ADMIN_PATH${NC}\n"
+# Crear directorio temporal para descargas
+TEMP_DIR=$(mktemp -d /tmp/hosting_update_XXXXXX)
 
-# 2. Actualizar Motor de Tareas
-printf "${YELLOW}Actualizando motor de tareas...${NC}\n"
-mkdir -p $ENGINE_PATH
-curl -sSL "$REPO_RAW/src/engine/server.php" -o "$ENGINE_PATH/server.php"
-curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$ENGINE_PATH/index.html.template"
-printf "${GREEN}- Motor de tareas actualizado en $ENGINE_PATH${NC}\n"
+# 1. Descargar Panel de Administración y Motor a /tmp
+printf "${YELLOW}Descargando archivos desde GitHub a /tmp...${NC}\n"
+curl -sSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php"
+curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
+curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
+curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
+
+if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
+    printf "${RED}Error: No se pudieron descargar los archivos esenciales.${NC}\n"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+# 2. Desplegar archivos a su destino final
+printf "${YELLOW}Desplegando archivos...${NC}\n"
+mkdir -p "$ADMIN_PATH" "$ENGINE_PATH"
+cp "$TEMP_DIR/index.php" "$ADMIN_PATH/index.php"
+cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
+cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
+cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
 
 # Ajustar permisos de propiedad y ejecución
 chown -R www-data:www-data $ADMIN_PATH
@@ -41,7 +51,7 @@ if [ -f "$ENGINE_PATH/server.php" ]; then
 fi
 
 # Limpieza final
-rm -rf $TEMP_DIR /tmp/hosting.tar.gz
+rm -rf "$TEMP_DIR" /tmp/hosting.tar.gz
 
 printf "${GREEN}====================================================${NC}\n"
 printf "${GREEN} Proceso de despliegue de archivos completado.${NC}\n"

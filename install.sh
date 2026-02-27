@@ -286,28 +286,38 @@ ufw --force enable
 # 12. Descarga y configuración de archivos del sistema
 printf "${YELLOW}Descargando archivos del panel y motor desde GitHub...${NC}\n"
 
-# Asegurar que los directorios existen
+# Crear directorio temporal para descargas
+TEMP_DIR=$(mktemp -d /tmp/hosting_XXXXXX)
+
+# Asegurar que los directorios finales existen
 mkdir -p "$ADMIN_PATH" "$ENGINE_PATH"
 
 # Definir URL base para archivos raw
 REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
 
-# Descargar archivos del Panel de Administración
-curl -sSL "$REPO_RAW/src/admin/index.php" -o "$ADMIN_PATH/index.php"
-curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$ADMIN_PATH/config.php.template"
+# Descargar archivos a /tmp primero
+curl -sSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php"
+curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
+curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
+curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
+curl -sSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh"
 
-# Descargar archivos del Motor
-curl -sSL "$REPO_RAW/src/engine/server.php" -o "$ENGINE_PATH/server.php"
-curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$ENGINE_PATH/index.html.template"
-
-# Descargar y preparar script de actualización (opcional pero recomendado)
-curl -sSL "$REPO_RAW/installadmin.sh" -o "./installadmin.sh"
-chmod +x ./installadmin.sh
-
-if [ ! -f "$ADMIN_PATH/index.php" ] || [ ! -f "$ENGINE_PATH/server.php" ]; then
+if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
     printf "${RED}Error: No se pudieron descargar los archivos esenciales desde GitHub.${NC}\n"
+    rm -rf "$TEMP_DIR"
     exit 1
 fi
+
+# Mover archivos a su destino final
+cp "$TEMP_DIR/index.php" "$ADMIN_PATH/index.php"
+cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
+cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
+cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
+cp "$TEMP_DIR/installadmin.sh" "./installadmin.sh"
+chmod +x ./installadmin.sh
+
+# Limpiar directorio temporal
+rm -rf "$TEMP_DIR"
 
 # Configurar Apache para escuchar en 8080
 if ! grep -q "Listen 8080" /etc/apache2/ports.conf; then
