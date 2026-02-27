@@ -331,6 +331,7 @@ curl -sSL "$REPO_RAW/src/admin/databases.php" -o "$TEMP_DIR/databases.php"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
+curl -sSL "$REPO_RAW/src/engine/sync_monitor.sh" -o "$TEMP_DIR/sync_monitor.sh"
 curl -sSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh"
 
 if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks.php" ] || [ ! -f "$TEMP_DIR/tasks_status.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
@@ -347,6 +348,7 @@ cp "$TEMP_DIR/databases.php" "$ADMIN_PATH/databases.php"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
+cp "$TEMP_DIR/sync_monitor.sh" "$ENGINE_PATH/sync_monitor.sh"
 cp "$TEMP_DIR/installadmin.sh" "./installadmin.sh"
 chmod +x ./installadmin.sh
 
@@ -539,13 +541,21 @@ a2ensite 000-admin.conf
 # 13. Configuración del Motor de Tareas (Cron)
 printf "${YELLOW}Configurando motor de tareas y cronjob...${NC}\n"
 chmod 700 $ENGINE_PATH/server.php
+chmod 700 $ENGINE_PATH/sync_monitor.sh
 
 # Configurar Cron (Comprobando si ya existe)
 if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/server.php"; then
-    printf "${GREEN}El cronjob ya está configurado. Saltando.${NC}\n"
+    printf "${GREEN}El cronjob del engine ya está configurado. Saltando.${NC}\n"
 else
     (crontab -l 2>/dev/null; echo "* * * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /usr/bin/php $ENGINE_PATH/server.php >> /var/log/hosting_engine.log 2>&1") | crontab -
-    printf "${GREEN}Cronjob añadido con éxito.${NC}\n"
+    printf "${GREEN}Cronjob del engine añadido con éxito.${NC}\n"
+fi
+
+if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/sync_monitor.sh"; then
+    printf "${GREEN}El cronjob del monitor de sync ya está configurado. Saltando.${NC}\n"
+else
+    (crontab -l 2>/dev/null; echo "* * * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /bin/bash $ENGINE_PATH/sync_monitor.sh > /dev/null 2>&1") | crontab -
+    printf "${GREEN}Cronjob del monitor de sync añadido con éxito.${NC}\n"
 fi
 
 # 14. Limpieza final de DISCO
