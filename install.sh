@@ -142,6 +142,13 @@ else
     printf "${RED}No se encontró el archivo de configuración del pool: $POOL_FILE${NC}\n"
 fi
 
+PHP_INI_FILE="/etc/php/${PHP_VERSION}/fpm/php.ini"
+if [ -f "$PHP_INI_FILE" ]; then
+    sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 128M/' $PHP_INI_FILE
+    sed -i 's/post_max_size = 8M/post_max_size = 128M/' $PHP_INI_FILE
+    sed -i 's/memory_limit = 128M/memory_limit = 256M/' $PHP_INI_FILE
+fi
+
 # Habilitar solo los módulos necesarios (sin activar PHP globalmente)
 a2enmod proxy_fcgi setenvif
 
