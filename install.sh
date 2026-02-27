@@ -475,7 +475,7 @@ chmod 700 $ENGINE_PATH/server.php
 if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/server.php"; then
     printf "${GREEN}El cronjob ya está configurado. Saltando.${NC}\n"
 else
-    (crontab -l 2>/dev/null; echo "* * * * * /usr/bin/php $ENGINE_PATH/server.php >> /var/log/hosting_engine.log 2>&1") | crontab -
+    (crontab -l 2>/dev/null; echo "* * * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /usr/bin/php $ENGINE_PATH/server.php >> /var/log/hosting_engine.log 2>&1") | crontab -
     printf "${GREEN}Cronjob añadido con éxito.${NC}\n"
 fi
 
