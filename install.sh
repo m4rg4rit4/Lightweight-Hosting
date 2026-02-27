@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # ==========================================================================
@@ -262,21 +263,29 @@ ufw allow 'Apache Full'
 ufw allow 8080/tcp
 ufw --force enable
 
-# 12. Configuración de Panel de Administración (Puerto 8080)
-# Asegurar directorios antes de nada
-mkdir -p $ADMIN_PATH $ENGINE_PATH
+# 12. Descarga y configuración de archivos del sistema
+echo -e "${YELLOW}Descargando archivos del panel y motor desde GitHub...${NC}"
 
-# Delegar descompresión y despliegue a script especializado
-if [ ! -f "./installadmin.sh" ]; then
-    echo -e "${YELLOW}installadmin.sh no encontrado locally. Descargándolo desde GitHub...${NC}"
-    curl -sSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/installadmin.sh -o installadmin.sh
-    chmod +x ./installadmin.sh
-fi
+# Asegurar que los directorios existen
+mkdir -p "$ADMIN_PATH" "$ENGINE_PATH"
 
-if [ -f "./installadmin.sh" ]; then
-    ./installadmin.sh || echo -e "${YELLOW}Aviso: installadmin.sh falló, pero continuaremos con la config básica.${NC}"
-else
-    echo -e "${RED}Error: No se pudo obtener installadmin.sh. Saltando despliegue de archivos.${NC}"
+# Definir URL base para archivos raw
+REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
+
+# Descargar archivos del Panel de Administración
+curl -sSL "$REPO_RAW/src/admin/index.php" -o "$ADMIN_PATH/index.php"
+curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$ADMIN_PATH/config.php.template"
+
+# Descargar archivos del Motor
+curl -sSL "$REPO_RAW/src/engine/server.php" -o "$ENGINE_PATH/server.php"
+
+# Descargar y preparar script de actualización (opcional pero recomendado)
+curl -sSL "$REPO_RAW/installadmin.sh" -o "./installadmin.sh"
+chmod +x ./installadmin.sh
+
+if [ ! -f "$ADMIN_PATH/index.php" ] || [ ! -f "$ENGINE_PATH/server.php" ]; then
+    echo -e "${RED}Error: No se pudieron descargar los archivos esenciales desde GitHub.${NC}"
+    exit 1
 fi
 
 # Configurar Apache para escuchar en 8080

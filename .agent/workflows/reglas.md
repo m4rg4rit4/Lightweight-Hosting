@@ -14,3 +14,8 @@ description: Reglas y restricciones de hardware del proyecto
 - **Seguridad**: Ningún proceso web (www-data) debe tener permisos de `sudo`. El motor de tareas (`server.php`) es el único con privilegios elevados.
 - Mantener compatibilidad con UTF-8 siempre (Powershell/Linux).
 - Configuración de Apache2 con mod_proxy_fcgi y aislamiento de PHP.
+
+
+
+# Importante, acutalizar siempre la documentación
+
