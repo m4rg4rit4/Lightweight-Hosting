@@ -17,11 +17,13 @@ Este documento analiza las funciones fundamentales que debe incluir el panel de 
 - **Creación de DBs y Usuarios:** Interfaces para crear bases de datos, contraseñas y asignar permisos granulares.
 - **Optimización de Recursos:** 
   - *Restricción Hardware:* El servicio MariaDB debe instalarse desactivando `performance_schema` y usando buffers pequeños para evitar penalizar la memoria global.
-- **Herramienta de Control:** Despliegue de un administrador de base de datos extra-ligero (ej. Adminer, ya que phpMyAdmin es más pesado).
+- **Herramienta de Control:** Soporte para **phpMyAdmin** (estándar completo) o **Adminer** (extra-ligero), seleccionable durante la instalación.
 
-## 4. Gestión de Archivos (FTP / SFTP)
-- **Acceso SFTP enjaulado (Chroot):** Como alternativa al uso de servicios puramente FTP como ProFTPD (que consumen memoria extra en background), se recomienda usar OpenSSH con configuración `ChrootDirectory` para cada usuario.
-- **Gestor Web de Archivos (File Manager):** Interfaz ligera desde el propio panel para subir, borrar y descomprimir `.zip` sin necesidad de cliente externo.
+## 4. Gestión de Archivos (File Manager Web)
+- **Gestor Web Integrado:** En lugar de implementar servicios pesados como FTP o complejos sistemas de SSH enjaulado, se optará por un gestor de archivos directamente en el panel de administración.
+- **Carga Drag-and-Drop:** Interfaz moderna que permita arrastrar y soltar ficheros para subirlos al `DocumentRoot` del sitio.
+- **Funciones Básicas:** Subir, eliminar, renombrar y descomprimir archivos `.zip` (para despliegues rápidos) sin necesidad de clientes externos como FileZilla.
+- *Ventaja:* Ahorro sustancial de memoria RAM al no tener demonios de FTP/SSH adicionales corriendo en segundo plano.
 
 ## 5. Cuentas de Correo (Enfoque Ligero)
 - **Redirecciones de Email (Forwarders):** Debido a que correr un stack de correo completo (Postfix + Dovecot + SpamAssassin + ClamAV) tumbaría un servidor de 1GB de RAM, la mejor opción base es ofrecer solo redireccionamiento a buzones externos (ej. hacia Gmail/Outlook) usando una configuración ligera de buzones virtuales en Postfix o similar.
@@ -38,21 +40,23 @@ Este documento analiza las funciones fundamentales que debe incluir el panel de 
 
 Esta es la ruta de desarrollo para integrar las opciones descritas siguiendo la filosofía de separación (Frontend Web -> Base de datos -> Motor root PHP):
 
-- [ ] **Fase 1: Infraestructura de Tareas (Motor)**
-  - [ ] Crear tabla de base de datos `sys_tasks` (id, user_id, action, payload, status, created_at, processed_at).
-  - [ ] Desarrollar `server.php` (ejecutado por root vía cron cada minuto) para leer e interpretar `sys_tasks`.
+- [x] **Fase 1: Infraestructura de Tareas (Motor)**
+  - [x] Crear tabla de base de datos `sys_tasks` (id, user_id, action, payload, status, created_at, processed_at).
+  - [x] Desarrollar `server.php` (ejecutado por root vía cron cada minuto) para leer e interpretar `sys_tasks`.
 
-- [ ] **Fase 2: Módulo de Usuarios y Permisos**
-  - [ ] Handler en `server.php` para la acción `create_user`: generar usuario local de Linux, definir contraseñas y preparar el `ChrootDirectory` de SFTP.
+- [ ] **Fase 2: Módulo de Gestión de Archivos (File Manager)**
+  - [ ] Implementar visor de directorios en el panel de administración.
+  - [ ] Desarrollar handler de subida (Upload) con soporte para arrastrar ficheros (Drag-and-Drop).
+  - [ ] Integrar funciones de manipulación de archivos (borrar, renombrar, descomprimir) mediante el motor `server.php` para asegurar permisos de `www-data`.
 
-- [ ] **Fase 3: Módulo de Web y PHP**
-  - [ ] Handler en `server.php` para la creación de pools PHP-FPM (`ondemand`).
-  - [ ] Handler para generar `<VirtualHost>` en Apache2, habilitando Proxy a ese pool FPM y recargando Apache (graceful).
+- [x] **Fase 3: Módulo de Web y PHP**
+  - [x] Handler en `server.php` para la creación de pools PHP-FPM (`ondemand`).
+  - [x] Handler para generar `<VirtualHost>` en Apache2, habilitando Proxy a ese pool FPM y recargando Apache (graceful).
 
 - [ ] **Fase 4: Módulo de Bases de Datos**
   - [ ] Ajustar la configuración `my.cnf` inicial para entornos de 1GB RAM (deshabilitar `performance_schema`).
   - [ ] Handler en `server.php` para invocar sentencias SQL (`CREATE DATABASE`, `GRANT PRIVILEGES`) de forma segura.
 
-- [ ] **Fase 5: Módulo de SSL y Dominios**
-  - [ ] Inclusión de peticiones estáticas `.well-known/acme-challenge` para certbot.
-  - [ ] Handler para disparar la ejecución de Certbot vía task y actualizar el VirtualHost con las rutas a los certificados Let's Encrypt.
+- [x] **Fase 5: Módulo de SSL y Dominios**
+  - [x] Inclusión de peticiones estáticas `.well-known/acme-challenge` para certbot.
+  - [x] Handler para disparar la ejecución de Certbot vía task y actualizar el VirtualHost con las rutas a los certificados Let's Encrypt.

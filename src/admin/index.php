@@ -181,7 +181,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
         <nav>
             <strong>Ingenia Hosting</strong>
             <a href="index.php">Sitios</a>
-            <a href="dbadmin/" target="_blank">Base de Datos</a>
+            <a href="<?php echo defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'dbadmin'; ?>/" target="_blank">Base de Datos</a>
         </nav>
         
         <h1>Añadir Nuevo Dominio</h1>

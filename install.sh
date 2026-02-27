@@ -25,14 +25,19 @@ fi
 
 # 2. Configuración de Hostname y FQDN
 echo -e "${YELLOW}Configuración del Hostname y Dominio${NC}"
-read -p "Introduce el FQDN completo (ej. server01.dominio.com): " FULL_FQDN
+CURRENT_FQDN=$(hostname -f 2>/dev/null || hostname)
+read -p "Introduce el FQDN completo [$CURRENT_FQDN]: " FULL_FQDN
+FULL_FQDN=${FULL_FQDN:-$CURRENT_FQDN}
+
 if [ -z "$FULL_FQDN" ]; then
     echo -e "${RED}El FQDN no puede estar vacío. Abortando.${NC}"
     exit 1
 fi
 
 echo -e "${YELLOW}Configuración del Email del Administrador (para Let's Encrypt)${NC}"
-read -p "Introduce el email del administrador: " ADMIN_EMAIL
+read -p "Introduce el email del administrador [${ADMIN_EMAIL:-admin@$FULL_FQDN}]: " NEW_EMAIL
+ADMIN_EMAIL=${NEW_EMAIL:-${ADMIN_EMAIL:-admin@$FULL_FQDN}}
+
 if [ -z "$ADMIN_EMAIL" ]; then
     echo -e "${RED}El email no puede estar vacío. Abortando.${NC}"
     exit 1
@@ -160,6 +165,7 @@ if [ -f "$EXISTING_CONFIG" ]; then
     echo -e "${GREEN}Detectada instalación existente. Cargando configuración...${NC}"
     EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_DB_MANAGER=$(grep "'DB_MANAGER_DIR'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     
     if [ ! -z "$EXISTING_DB_PASS" ]; then
         DB_ADMIN_PASS="$EXISTING_DB_PASS"
@@ -294,6 +300,24 @@ if ! grep -q "Listen 8080" /etc/apache2/ports.conf; then
 fi
 
 # Inyectar configuración dinámica (respetando lo existente si es update)
+# Preguntar por el gestor de base de datos
+CURRENT_MANAGER=${EXISTING_DB_MANAGER:-"phpmyadmin"}
+echo -e "${YELLOW}Selecciona el Gestor de Base de Datos [Actual: $CURRENT_MANAGER]:${NC}"
+echo -e "1) phpMyAdmin (Completo, más pesado)"
+echo -e "2) Adminer (Ligero, un solo archivo)"
+read -p "Opción [1-2]: " DB_MANAGER_OPT
+
+if [ "$DB_MANAGER_OPT" == "2" ]; then
+    DB_MANAGER_DIR="dbadmin"
+    # Limpiar phpmyadmin si existía para ahorrar espacio
+    [ "$CURRENT_MANAGER" == "phpmyadmin" ] && rm -rf "$ADMIN_PATH/phpmyadmin"
+else
+    # Si no se elige 2, por defecto es 1 o se mantiene el actual si era ya pma
+    DB_MANAGER_DIR="phpmyadmin"
+    # Limpiar adminer si existía para ahorrar espacio
+    [ "$CURRENT_MANAGER" == "dbadmin" ] && rm -rf "$ADMIN_PATH/dbadmin"
+fi
+
 cat <<EOF > $ADMIN_PATH/config.php
 <?php
 define('DB_HOST', '127.0.0.1');
@@ -301,6 +325,7 @@ define('DB_NAME', 'dbadmin');
 define('DB_USER', 'dbadmin');
 define('DB_PASS', '$DB_ADMIN_PASS');
 define('ADMIN_EMAIL', '$ADMIN_EMAIL');
+define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
 
 function getPDO() {
     static \$pdo;
@@ -318,10 +343,35 @@ EOF
 chown -R www-data:www-data $ADMIN_PATH
 chmod -R 755 $ADMIN_PATH
 
-# Instalación de Adminer dentro del panel
-ADMINER_DIR="$ADMIN_PATH/dbadmin"
-mkdir -p $ADMINER_DIR
-curl -L https://www.adminer.org/latest.php -o $ADMINER_DIR/index.php
+# Instalación del gestor de base de datos
+if [ "$DB_MANAGER_DIR" == "phpmyadmin" ]; then
+    echo -e "${YELLOW}Instalando phpMyAdmin (vía descarga directa)...${NC}"
+    PMA_VER="5.2.1"
+    PMA_URL="https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER}/phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
+    curl -sSL "$PMA_URL" -o /tmp/pma.tar.gz
+    mkdir -p "$ADMIN_PATH/phpmyadmin"
+    tar -xzf /tmp/pma.tar.gz -C "$ADMIN_PATH/phpmyadmin" --strip-components=1
+    rm /tmp/pma.tar.gz
+    
+    # Configuración básica para phpMyAdmin
+    PMA_SECRET=$(openssl rand -base64 32)
+    cat <<EOF > "$ADMIN_PATH/phpmyadmin/config.inc.php"
+<?php
+\$cfg['blowfish_secret'] = '$PMA_SECRET';
+\$i = 0; \$i++;
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+\$cfg['Servers'][\$i]['host'] = '127.0.0.1';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+?>
+EOF
+    chown -R www-data:www-data "$ADMIN_PATH/phpmyadmin"
+else
+    echo -e "${YELLOW}Instalando Adminer...${NC}"
+    mkdir -p "$ADMIN_PATH/dbadmin"
+    curl -L https://www.adminer.org/latest.php -o "$ADMIN_PATH/dbadmin/index.php"
+    chown -R www-data:www-data "$ADMIN_PATH/dbadmin"
+fi
 
 # Crear VirtualHost para el puerto 8080
 cat <<EOF > /etc/apache2/sites-available/000-admin.conf
