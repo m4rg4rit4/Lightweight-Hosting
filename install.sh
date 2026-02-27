@@ -94,6 +94,12 @@ apt update && apt upgrade -y || { printf "${RED}Error al actualizar APT. Abortan
 printf "${YELLOW}Instalando paquetes base...${NC}\n"
 apt install -y ufw curl git unzip cron certbot python3-certbot-apache dnsutils || { printf "${RED}Error al instalar paquetes base.${NC}\n"; exit 1; }
 
+# Instalación de megacmd para copias de seguridad
+printf "${YELLOW}Instalando megacmd...${NC}\n"
+curl -sL https://mega.nz/linux/repo/Debian_13/amd64/megacmd-Debian_13_amd64.deb -o /tmp/megacmd.deb
+apt install -y /tmp/megacmd.deb || { printf "${RED}Error al instalar megacmd.${NC}\n"; exit 1; }
+rm -f /tmp/megacmd.deb
+
 # 8. Instalación de Apache2 (MPM Event)
 printf "${YELLOW}Instalando y optimizando Apache2...${NC}\n"
 apt install -y apache2 || { printf "${RED}Error al instalar Apache2.${NC}\n"; exit 1; }
@@ -289,6 +295,24 @@ mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_databases (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX (site_id)
 );"
+
+# Crear tabla de configuraciones del sistema (MEGA etc)
+mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_settings (
+    setting_key VARCHAR(64) PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);"
+
+# Crear tabla de copias de seguridad
+mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_backups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    site_id INT NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    mega_path VARCHAR(255) NOT NULL,
+    status ENUM('pending', 'completed', 'failed', 'restoring') DEFAULT 'completed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX (site_id)
+);"
 mariadb -e "FLUSH PRIVILEGES;"
 
 # Crear primer sitio (el host principal)
@@ -336,6 +360,7 @@ curl -sSL "$REPO_RAW/src/admin/tasks.php" -o "$TEMP_DIR/tasks.php"
 curl -sSL "$REPO_RAW/src/admin/tasks_status.php" -o "$TEMP_DIR/tasks_status.php"
 curl -sSL "$REPO_RAW/src/admin/filemanager.php" -o "$TEMP_DIR/filemanager.php"
 curl -sSL "$REPO_RAW/src/admin/databases.php" -o "$TEMP_DIR/databases.php"
+curl -sSL "$REPO_RAW/src/admin/backups.php" -o "$TEMP_DIR/backups.php"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
@@ -354,6 +379,7 @@ cp "$TEMP_DIR/tasks.php" "$ADMIN_PATH/tasks.php"
 cp "$TEMP_DIR/tasks_status.php" "$ADMIN_PATH/tasks_status.php"
 cp "$TEMP_DIR/filemanager.php" "$ADMIN_PATH/filemanager.php"
 cp "$TEMP_DIR/databases.php" "$ADMIN_PATH/databases.php"
+cp "$TEMP_DIR/backups.php" "$ADMIN_PATH/backups.php"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"

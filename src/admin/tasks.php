@@ -84,6 +84,7 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 25"
         <nav>
             <strong>Lightweight Hosting</strong>
             <a href="index.php">Sitios</a>
+            <a href="backups.php">Backups (MEGA)</a>
             <a href="tasks.php" style="color: var(--text);">Historial de Tareas</a>
         </nav>
 

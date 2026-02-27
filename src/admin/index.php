@@ -273,6 +273,7 @@ $sites = $pdo->query("
         <nav>
             <strong>Lightweight Hosting</strong>
             <a href="index.php">Sitios</a>
+            <a href="backups.php">Backups (MEGA)</a>
             <a href="<?php echo defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'dbadmin'; ?>/" target="_blank">Base de Datos</a>
             
             <a href="tasks.php" id="task-notification" style="display: none; text-decoration: none;" class="notification-container">

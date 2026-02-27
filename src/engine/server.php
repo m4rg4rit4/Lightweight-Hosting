@@ -115,6 +115,20 @@ try {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX (site_id)
     )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS sys_settings (
+        setting_key VARCHAR(64) PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS sys_backups (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        site_id INT NOT NULL,
+        filename VARCHAR(255) NOT NULL,
+        mega_path VARCHAR(255) NOT NULL,
+        status ENUM('pending', 'completed', 'failed', 'restoring') DEFAULT 'completed',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX (site_id)
+    )");
 } catch (Exception $e) {
     // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root
 }
@@ -403,6 +417,186 @@ foreach ($tasks as $task) {
             
             $pdo->prepare("UPDATE sys_databases SET db_pass = ? WHERE db_user = ? AND db_name = ?")->execute([$newPass, $dbUser, $dbName]);
             $msg = "Password changed for database user $dbUser.";
+            $success = true;
+            break;
+
+        case 'MEGA_LOGIN':
+            $email = escapeshellarg($payload['email']);
+            $password = escapeshellarg($payload['password']);
+            
+            exec("/usr/bin/mega-login $email $password 2>&1", $output, $resultCode);
+            $outStr = implode(" ", $output);
+            if ($resultCode === 0 || strpos($outStr, 'Already logged in') !== false || strpos($outStr, 'Login completed') !== false) {
+                $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('mega_email', ?)")->execute([$payload['email']]);
+                $msg = "MEGA account linked successfully.";
+                $success = true;
+            } else {
+                $msg = "MEGA login failed: " . $outStr;
+                $success = false;
+            }
+            break;
+
+        case 'MEGA_LOGOUT':
+            exec("/usr/bin/mega-logout 2>&1", $output, $resultCode);
+            $pdo->prepare("DELETE FROM sys_settings WHERE setting_key = 'mega_email'")->execute();
+            $msg = "MEGA account logged out.";
+            $success = true;
+            break;
+
+        case 'SITE_BACKUP':
+            $siteId = $payload['site_id'];
+            $site = $pdo->prepare("SELECT domain, document_root FROM sys_sites WHERE id = ?");
+            $site->execute([$siteId]);
+            $siteData = $site->fetch();
+            
+            if (!$siteData) {
+                $msg = "Site not found for backup.";
+                $success = false;
+                break;
+            }
+            
+            $domain = $siteData['domain'];
+            $docRoot = $siteData['document_root'];
+            
+            $dbs = $pdo->prepare("SELECT db_name, db_user, db_pass FROM sys_databases WHERE site_id = ?");
+            $dbs->execute([$siteId]);
+            $dbData = $dbs->fetch();
+            
+            $timestamp = date('Ymd_His');
+            $backupFile = "backup_{$domain}_{$timestamp}.tar.gz";
+            $tmpDir = "/tmp/backup_{$domain}_{$timestamp}";
+            $tmpTar = "/tmp/$backupFile";
+            
+            mkdir($tmpDir, 0755, true);
+            
+            $config = [
+                'domain' => $domain,
+                'document_root' => $docRoot,
+                'timestamp' => $timestamp
+            ];
+            
+            if ($dbData) {
+                $config['db_name'] = $dbData['db_name'];
+                $config['db_user'] = $dbData['db_user'];
+                $config['db_pass'] = $dbData['db_pass'];
+                
+                $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+                $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+                $dbNameArg = escapeshellarg($dbData['db_name']);
+                
+                // Using mariadb-dump (or mysqldump for compatibility)
+                if (file_exists('/usr/bin/mariadb-dump')) {
+                    shell_exec("mariadb-dump $auth {$dbNameArg} | gzip > {$tmpDir}/database.sql.gz");
+                } else {
+                    shell_exec("mysqldump $auth {$dbNameArg} | gzip > {$tmpDir}/database.sql.gz");
+                }
+            }
+            
+            file_put_contents("$tmpDir/config.json", json_encode($config, JSON_PRETTY_PRINT));
+            
+            // Symlink to save space during tar (dereference with -h)
+            symlink($docRoot, "$tmpDir/webroot");
+            
+            $tarCmd = "tar -czfh " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json webroot";
+            if (file_exists("$tmpDir/database.sql.gz")) {
+                $tarCmd = "tar -czfh " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json database.sql.gz webroot";
+            }
+            shell_exec($tarCmd);
+            
+            $megaPath = "/Backups/{$domain}";
+            exec("/usr/bin/mega-mkdir -p " . escapeshellarg($megaPath) . " 2>&1");
+            exec("/usr/bin/mega-put " . escapeshellarg($tmpTar) . " " . escapeshellarg($megaPath) . " 2>&1", $outMega, $resMega);
+            
+            if ($resMega === 0 || strpos(implode(" ", $outMega), 'uploaded') !== false) {
+                $pdo->prepare("INSERT INTO sys_backups (site_id, filename, mega_path, status) VALUES (?, ?, ?, 'completed')")
+                    ->execute([$siteId, $backupFile, $megaPath]);
+                $msg = "Backup $backupFile uploaded completely.";
+                $success = true;
+            } else {
+                $msg = "MEGA upload failed: " . implode(" ", $outMega);
+                $success = false;
+            }
+            
+            shell_exec("rm -rf " . escapeshellarg($tmpDir));
+            @unlink($tmpTar);
+            
+            // Retention
+            $retention = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'backup_retention_days'")->fetchColumn();
+            if ($retention && is_numeric($retention)) {
+                $oldBackups = $pdo->prepare("SELECT id, filename, mega_path FROM sys_backups WHERE site_id = ? AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
+                $oldBackups->execute([$siteId, $retention]);
+                foreach($oldBackups->fetchAll() as $old) {
+                    $rmPath = escapeshellarg($old['mega_path'] . '/' . $old['filename']);
+                    exec("/usr/bin/mega-rm $rmPath 2>&1");
+                    $pdo->prepare("DELETE FROM sys_backups WHERE id = ?")->execute([$old['id']]);
+                }
+            }
+            break;
+
+        case 'SITE_RESTORE':
+            $backupId = $payload['backup_id'];
+            $backup = $pdo->prepare("SELECT * FROM sys_backups WHERE id = ?");
+            $backup->execute([$backupId]);
+            $backupData = $backup->fetch();
+            
+            if (!$backupData) {
+                $msg = "Backup record not found.";
+                $success = false;
+                break;
+            }
+            
+            $siteId = $backupData['site_id'];
+            $site = $pdo->prepare("SELECT domain, document_root FROM sys_sites WHERE id = ?");
+            $site->execute([$siteId]);
+            $siteData = $site->fetch();
+            
+            if (!$siteData) {
+                $msg = "Target site associated with backup not found.";
+                $success = false;
+                break;
+            }
+            
+            $docRoot = escapeshellarg($siteData['document_root']);
+            $remoteFile = escapeshellarg($backupData['mega_path'] . '/' . $backupData['filename']);
+            $tmpTar = "/tmp/" . $backupData['filename'];
+            $tmpDir = "/tmp/restore_dir_" . uniqid();
+            
+            exec("/usr/bin/mega-get $remoteFile " . escapeshellarg("/tmp/") . " 2>&1", $outMega, $resMega);
+            
+            if (!file_exists($tmpTar)) {
+                $msg = "Failed to download backup from MEGA: " . implode(" ", $outMega);
+                $success = false;
+                break;
+            }
+            
+            mkdir($tmpDir, 0755, true);
+            shell_exec("tar -xzf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir));
+            
+            if (file_exists("$tmpDir/database.sql.gz")) {
+                $dbs = $pdo->prepare("SELECT db_name FROM sys_databases WHERE site_id = ?");
+                $dbs->execute([$siteId]);
+                $dbData = $dbs->fetch();
+                if ($dbData) {
+                    $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+                    $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+                    $dbNameArg = escapeshellarg($dbData['db_name']);
+                    
+                    shell_exec("mariadb $auth -e \"DROP DATABASE IF EXISTS $dbNameArg; CREATE DATABASE $dbNameArg;\"");
+                    shell_exec("zcat " . escapeshellarg("$tmpDir/database.sql.gz") . " | mariadb $auth $dbNameArg");
+                }
+            }
+            
+            if (is_dir("$tmpDir/webroot")) {
+                // Remove existing files and copy new ones
+                shell_exec("sh -c 'rm -rf $docRoot/.[!.]* $docRoot/*'");
+                shell_exec("cp -a $tmpDir/webroot/. $docRoot/");
+                shell_exec("chown -R www-data:www-data $docRoot");
+            }
+            
+            shell_exec("rm -rf " . escapeshellarg($tmpDir));
+            @unlink($tmpTar);
+            
+            $msg = "Site successfully restored from MEGA.";
             $success = true;
             break;
 
