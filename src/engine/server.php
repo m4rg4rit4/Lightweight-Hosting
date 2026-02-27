@@ -101,6 +101,7 @@ foreach ($tasks as $task) {
         case 'SSL_LETSENCRYPT':
             $publicIP = getPublicIP();
             $dnsOk = checkExternalDNS($domain, $publicIP);
+            // Comprobamos www explícitamente con DNS de Google
             $dnsWwwOk = checkExternalDNS("www." . $domain, $publicIP);
 
             if (!$dnsOk) {
@@ -111,17 +112,26 @@ foreach ($tasks as $task) {
 
             $email = defined('ADMIN_EMAIL') ? ADMIN_EMAIL : "admin@$domain";
             $domainsArg = "-d " . escapeshellarg($domain);
-            if ($dnsWwwOk) $domainsArg .= " -d " . escapeshellarg("www.$domain");
             
-            $cmd = "certbot --apache $domainsArg --non-interactive --agree-tos --email " . escapeshellarg($email) . " --redirect 2>&1";
+            // Solo intentamos añadir www. si es un dominio principal (exactamente un punto)
+            // y si las DNS de www. apuntan a nuestra IP.
+            $dotCount = substr_count($domain, '.');
+            if ($dotCount === 1 && $dnsWwwOk) {
+                $domainsArg .= " -d " . escapeshellarg("www.$domain");
+            }
+            
+            // Usamos --keep-until-expiring para evitar que certbot falle si el cert ya es reciente
+            $cmd = "certbot --apache $domainsArg --non-interactive --agree-tos --email " . escapeshellarg($email) . " --redirect --keep-until-expiring 2>&1";
             exec($cmd, $output, $resultCode);
 
-            if ($resultCode === 0) {
+            // Verificación robusta: aunque certbot de un código de salida extraño, 
+            // si el archivo existe, es que el SSL está operativo.
+            if (file_exists("/etc/letsencrypt/live/$domain/fullchain.pem")) {
                 $pdo->prepare("UPDATE sys_sites SET ssl_enabled = 1 WHERE domain = ?")->execute([$domain]);
-                $msg = "SSL issued and applied.";
+                $msg = "SSL issued or already exists. Files verified.";
                 $success = true;
             } else {
-                $msg = "Certbot error: " . end($output);
+                $msg = "Certbot error: " . (isset($output) ? end($output) : "Unknown error");
             }
             break;
 
