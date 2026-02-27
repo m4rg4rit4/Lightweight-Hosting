@@ -10,12 +10,12 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Configuración de URLs y Rutas
-BUNDLE_URL="https://tu-servidor.com/hosting-bundle.tar.gz"
+BUNDLE_URL="https://github.com/m4rg4rit4/Lightweight-Hosting/archive/refs/heads/main.tar.gz"
 TEMP_DIR="/tmp/hosting_install"
 ADMIN_PATH="/var/www/admin_panel"
 ENGINE_PATH="/usr/local/bin/hosting"
 
-echo -e "${YELLOW}Descargando paquete de hosting desde servidor remoto...${NC}"
+echo -e "${YELLOW}Descargando paquete de hosting desde GitHub...${NC}"
 
 # Limpieza de restos previos
 rm -rf $TEMP_DIR /tmp/hosting.tar.gz
@@ -25,14 +25,14 @@ mkdir -p $TEMP_DIR
 curl -L $BUNDLE_URL -o /tmp/hosting.tar.gz 2>/dev/null
 
 if [ ! -f "/tmp/hosting.tar.gz" ]; then
-    echo -e "${RED}Error: No se pudo descargar el archivo .tar.gz desde la URL proporcionada.${NC}"
+    echo -e "${RED}Error: No se pudo descargar el archivo .tar.gz desde GitHub.${NC}"
     exit 1
 fi
 
 echo -e "${YELLOW}Extrayendo archivos y distribuyendo en el sistema...${NC}"
 
-# Extraer el tar.gz
-tar -xzf /tmp/hosting.tar.gz -C $TEMP_DIR
+# Extraer el tar.gz quitando el primer nivel de directorio (Lightweight-Hosting-main/)
+tar -xzf /tmp/hosting.tar.gz --strip-components=1 -C $TEMP_DIR
 
 # Asegurar que los directorios de destino existen
 mkdir -p $ADMIN_PATH

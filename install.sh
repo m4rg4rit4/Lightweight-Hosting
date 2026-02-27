@@ -267,11 +267,16 @@ ufw --force enable
 mkdir -p $ADMIN_PATH $ENGINE_PATH
 
 # Delegar descompresión y despliegue a script especializado
-if [ -f "./installadmin.sh" ]; then
+if [ ! -f "./installadmin.sh" ]; then
+    echo -e "${YELLOW}installadmin.sh no encontrado locally. Descargándolo desde GitHub...${NC}"
+    curl -sSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/installadmin.sh -o installadmin.sh
     chmod +x ./installadmin.sh
+fi
+
+if [ -f "./installadmin.sh" ]; then
     ./installadmin.sh || echo -e "${YELLOW}Aviso: installadmin.sh falló, pero continuaremos con la config básica.${NC}"
 else
-    echo -e "${RED}Error: No se encontró installadmin.sh. Saltando despliegue de archivos.${NC}"
+    echo -e "${RED}Error: No se pudo obtener installadmin.sh. Saltando despliegue de archivos.${NC}"
 fi
 
 # Configurar Apache para escuchar en 8080

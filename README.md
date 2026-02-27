@@ -15,7 +15,13 @@ Un sistema de hosting ultra-ligero diseñado para hardware extremadamente limita
 - **Disco**: 10 GB (Optimizado con limpieza agresiva de caché).
 
 ## 🚀 Instalación
-Para instalar el sistema en un Debian 13 limpio:
+Para instalar el sistema en un servidor Debian 13 limpio, ejecuta el siguiente comando como root (o con sudo):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/install.sh -o install.sh && chmod +x install.sh && sudo ./install.sh
+```
+
+Alternativamente, puedes clonar el repositorio:
 
 ```bash
 git clone https://github.com/m4rg4rit4/Lightweight-Hosting.git
@@ -29,3 +35,5 @@ sudo ./install.sh
 - `src/engine`: Motor de procesamiento de tareas (Background worker).
 - `install.sh`: Script principal de instalación y optimización del SO.
 - `installadmin.sh`: Script para despliegue y actualizaciones de la interfaz.
+
+
