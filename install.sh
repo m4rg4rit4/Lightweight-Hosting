@@ -298,6 +298,7 @@ curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$ADMIN_PATH/config.php.t
 
 # Descargar archivos del Motor
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$ENGINE_PATH/server.php"
+curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$ENGINE_PATH/index.html.template"
 
 # Descargar y preparar script de actualización (opcional pero recomendado)
 curl -sSL "$REPO_RAW/installadmin.sh" -o "./installadmin.sh"

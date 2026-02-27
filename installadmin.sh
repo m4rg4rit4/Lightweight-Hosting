@@ -27,6 +27,7 @@ echo -e "${GREEN}- Interfaz de administración actualizada en $ADMIN_PATH${NC}"
 echo -e "${YELLOW}Actualizando motor de tareas...${NC}"
 mkdir -p $ENGINE_PATH
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$ENGINE_PATH/server.php"
+curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$ENGINE_PATH/index.html.template"
 echo -e "${GREEN}- Motor de tareas actualizado en $ENGINE_PATH${NC}"
 
 # Ajustar permisos de propiedad y ejecución

@@ -91,6 +91,16 @@ foreach ($tasks as $task) {
                 mkdir($path, 0755, true);
                 shell_exec("chown www-data:www-data $path");
             }
+
+            // Copiar index.html inicial si el directorio está vacío
+            $indexPath = rtrim($path, '/') . '/index.html';
+            $indexPhpPath = rtrim($path, '/') . '/index.php';
+            $templatePath = __DIR__ . '/index.html.template';
+
+            if (!file_exists($indexPath) && !file_exists($indexPhpPath) && file_exists($templatePath)) {
+                copy($templatePath, $indexPath);
+                shell_exec("chown www-data:www-data " . escapeshellarg($indexPath));
+            }
             file_put_contents("/etc/apache2/sites-available/$domain.conf", generateVhost($domain, $path, $php, $php_v));
             shell_exec("a2ensite $domain.conf && systemctl reload apache2");
             $pdo->prepare("UPDATE sys_sites SET status = 'active' WHERE domain = ?")->execute([$domain]);
