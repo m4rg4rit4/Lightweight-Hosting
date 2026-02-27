@@ -214,10 +214,10 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
             <a href="index.php">Sitios</a>
             <a href="<?php echo defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'dbadmin'; ?>/" target="_blank">Base de Datos</a>
             
-            <div id="task-notification" style="display: none;" class="notification-container">
+            <a href="tasks.php" id="task-notification" style="display: none; text-decoration: none;" class="notification-container">
                 <span class="notification-dot"></span>
                 <span class="pending-text">TAREAS PENDIENTES</span>
-            </div>
+            </a>
         </nav>
         
         <h1>Añadir Nuevo Dominio</h1>

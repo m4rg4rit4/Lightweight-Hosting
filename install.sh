@@ -314,13 +314,14 @@ REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
 
 # Descargar archivos a /tmp primero
 curl -sSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php"
+curl -sSL "$REPO_RAW/src/admin/tasks.php" -o "$TEMP_DIR/tasks.php"
 curl -sSL "$REPO_RAW/src/admin/tasks_status.php" -o "$TEMP_DIR/tasks_status.php"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
 curl -sSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh"
 
-if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks_status.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
+if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks.php" ] || [ ! -f "$TEMP_DIR/tasks_status.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
     printf "${RED}Error: No se pudieron descargar los archivos esenciales desde GitHub.${NC}\n"
     rm -rf "$TEMP_DIR"
     exit 1
@@ -328,6 +329,7 @@ fi
 
 # Mover archivos a su destino final
 cp "$TEMP_DIR/index.php" "$ADMIN_PATH/index.php"
+cp "$TEMP_DIR/tasks.php" "$ADMIN_PATH/tasks.php"
 cp "$TEMP_DIR/tasks_status.php" "$ADMIN_PATH/tasks_status.php"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
