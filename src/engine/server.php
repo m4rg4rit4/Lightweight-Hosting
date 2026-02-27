@@ -128,14 +128,27 @@ foreach ($tasks as $task) {
                 shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($path));
             }
 
-            // Copiar index.html inicial si el directorio está vacío
+            // Copiar index.html inicial si el directorio está vacío (o si es el root principal /var/www/html)
             $indexPath = rtrim($path, '/') . '/index.html';
             $indexPhpPath = rtrim($path, '/') . '/index.php';
             $templatePath = __DIR__ . '/index.html.template';
 
-            if (!file_exists($indexPath) && !file_exists($indexPhpPath) && file_exists($templatePath)) {
-                copy($templatePath, $indexPath);
-                shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($indexPath));
+            $isEmpty = !file_exists($indexPath) && !file_exists($indexPhpPath);
+            $isMainRoot = ($path === '/var/www/html');
+
+            if (($isEmpty || $isMainRoot) && file_exists($templatePath)) {
+                // Si es root de apache por defecto, quitar el de Debian si existe
+                if ($isMainRoot && file_exists($indexPath)) {
+                    $content = file_get_contents($indexPath);
+                    if (strpos($content, "Debian") !== false || strpos($content, "Apache2 Debian Default Page") !== false) {
+                        unlink($indexPath);
+                    }
+                }
+                
+                if (!file_exists($indexPath) && !file_exists($indexPhpPath)) {
+                    copy($templatePath, $indexPath);
+                    shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($indexPath));
+                }
             }
             file_put_contents("/etc/apache2/sites-available/$domain.conf", generateVhost($domain, $path, $php, $php_v));
             shell_exec("$cmd_a2ensite $domain.conf && $cmd_apache_reload");
@@ -189,6 +202,33 @@ foreach ($tasks as $task) {
                 $pdo->prepare("UPDATE sys_sites SET ssl_enabled = 1 WHERE domain = ?")->execute([$domain]);
                 $msg = "SSL issued or already exists. Files verified.";
                 $success = true;
+
+                // --- Compartir SSL con el panel de administración (Puerto 8080) ---
+                // Solo si el dominio coincide con el del sitio #1 (el principal)
+                $mainSite = $pdo->query("SELECT domain FROM sys_sites WHERE id = 1")->fetchColumn();
+                if ($domain === $mainSite) {
+                    $adminConf = "/etc/apache2/sites-available/000-admin.conf";
+                    if (file_exists($adminConf)) {
+                        $confContent = file_get_contents($adminConf);
+                        // Añadir directivas SSL para 8080 si no están ya presentes
+                        if (strpos($confContent, "SSLEngine on") === false) {
+                            $certPath = "/etc/letsencrypt/live/$domain";
+                            $sslPart = "\n    SSLEngine on\n";
+                            $sslPart .= "    SSLCertificateFile $certPath/fullchain.pem\n";
+                            $sslPart .= "    SSLCertificateKeyFile $certPath/privkey.pem\n";
+                            // Intentar incluir el archivo de opciones de SSL si existe
+                            if (file_exists("/etc/letsencrypt/options-ssl-apache.conf")) {
+                                $sslPart .= "    Include /etc/letsencrypt/options-ssl-apache.conf\n";
+                            }
+                            
+                            // Insertar antes del cierre de VirtualHost
+                            $confContent = str_replace("</VirtualHost>", $sslPart . "</VirtualHost>", $confContent);
+                            file_put_contents($adminConf, $confContent);
+                            shell_exec($cmd_apache_reload);
+                            $msg .= " Admin panel SSL updated.";
+                        }
+                    }
+                }
             } else {
                 $msg = "Certbot error: " . (isset($output) ? end($output) : "Unknown error");
             }

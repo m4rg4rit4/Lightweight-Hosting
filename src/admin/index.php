@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchAll();
+$sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -242,6 +242,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
         <table>
             <thead>
                 <tr>
+                    <th>ID</th>
                     <th>Dominio</th>
                     <th>PHP</th>
                     <th>SSL</th>
@@ -252,6 +253,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
             <tbody>
                 <?php foreach ($sites as $s): ?>
                 <tr>
+                    <td style="color: var(--text-dim); font-weight: 600; font-family: monospace;">#<?php echo $s['id']; ?></td>
                     <td style="font-weight: 500;">
                         <?php echo htmlspecialchars($s['domain']); ?>
                         <div style="font-size: 0.75rem; color: var(--text-dim); font-weight: 300;"><?php echo $s['created_at']; ?></div>
@@ -292,11 +294,15 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
                                     <?php echo ($s['status'] === 'active') ? 'Desactivar' : 'Activar'; ?>
                                 </button>
                             </form>
+                            <?php if ($s['id'] != 1): ?>
                             <form method="POST" style="display:inline;" onsubmit="return confirm('¿Estás seguro de eliminar el dominio <?php echo $s['domain']; ?>?');">
                                 <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                                 <input type="hidden" name="action" value="delete">
                                 <button type="submit" class="btn btn-outline btn-sm btn-danger">Eliminar</button>
                             </form>
+                            <?php else: ?>
+                                <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede eliminar">Eliminar</button>
+                            <?php endif; ?>
                         </div>
                     </td>
                 </tr>
