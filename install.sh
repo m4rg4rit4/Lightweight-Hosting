@@ -297,6 +297,7 @@ printf "${YELLOW}Configurando Firewall...${NC}\n"
 ufw allow OpenSSH
 ufw allow 'Apache Full'
 ufw allow 8080/tcp
+ufw allow 8090/tcp
 ufw --force enable
 
 # 12. Descarga y configuración de archivos del sistema
@@ -313,12 +314,13 @@ REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
 
 # Descargar archivos a /tmp primero
 curl -sSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php"
+curl -sSL "$REPO_RAW/src/admin/tasks_status.php" -o "$TEMP_DIR/tasks_status.php"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
 curl -sSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh"
 
-if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
+if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks_status.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
     printf "${RED}Error: No se pudieron descargar los archivos esenciales desde GitHub.${NC}\n"
     rm -rf "$TEMP_DIR"
     exit 1
@@ -326,6 +328,7 @@ fi
 
 # Mover archivos a su destino final
 cp "$TEMP_DIR/index.php" "$ADMIN_PATH/index.php"
+cp "$TEMP_DIR/tasks_status.php" "$ADMIN_PATH/tasks_status.php"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
@@ -338,6 +341,9 @@ rm -rf "$TEMP_DIR"
 # Configurar Apache para escuchar en 8080
 if ! grep -q "Listen 8080" /etc/apache2/ports.conf; then
     echo "Listen 8080" >> /etc/apache2/ports.conf
+fi
+if ! grep -q "Listen 8090" /etc/apache2/ports.conf; then
+    echo "Listen 8090" >> /etc/apache2/ports.conf
 fi
 
 # Inyectar configuración dinámica (respetando lo existente si es update)
@@ -450,6 +456,38 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
         Require all granted
     </Directory>
 </VirtualHost>
+
+# VirtualHost para el puerto 8090 (SSL Version)
+<VirtualHost *:8090>
+    DocumentRoot $ADMIN_PATH
+    DirectoryIndex index.php
+    ErrorLog \${APACHE_LOG_DIR}/admin_ssl_error.log
+    CustomLog \${APACHE_LOG_DIR}/admin_ssl_access.log combined
+
+    Alias /phpmyadmin $ADMIN_PATH/phpmyadmin
+    Alias /dbadmin $ADMIN_PATH/dbadmin
+
+    <Directory $ADMIN_PATH>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+        <FilesMatch \.php$>
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
+        </FilesMatch>
+    </Directory>
+
+    # Configuración específica para el gestor de BD en 8090
+    <Directory $ADMIN_PATH/phpmyadmin>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    <Directory $ADMIN_PATH/dbadmin>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
 EOF
 
 # Configuración global para el gestor de BD (accesible desde cualquier dominio/subdominio)
@@ -529,6 +567,7 @@ printf "\n"
 printf "${YELLOW}DATOS DE ACCESO IMPORTANTES:${NC}\n"
 printf "MariaDB Root Password: ${GREEN}$DB_ROOT_PASS${NC}\n"
 printf "Panel de Control:     ${YELLOW}http://$FULL_FQDN:8080/${NC}\n"
+printf "Panel (Seguro):       ${YELLOW}https://$FULL_FQDN:8090/${NC}\n"
 printf "Gestor DB (Directo):  ${YELLOW}http://$FULL_FQDN:8080/$DB_MANAGER_DIR/${NC}\n"
 printf "Gestor DB (Alias):    ${YELLOW}http://$FULL_FQDN/$DB_MANAGER_DIR/${NC}\n"
 printf "Admin DB User: ${GREEN}dbadmin${NC}\n"
