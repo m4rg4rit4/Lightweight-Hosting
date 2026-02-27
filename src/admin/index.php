@@ -49,14 +49,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $payload['new_value'] = $site['php_enabled'] ? 0 : 1;
                     break;
                 case 'toggle_status':
-                    $taskType = 'SITE_TOGGLE_STATUS';
-                    $payload['new_status'] = ($site['status'] === 'active') ? 'inactive' : 'active';
+                    if ($siteId == 1 && $site['status'] === 'active') {
+                        $msg = "El sitio principal no puede ser desactivado.";
+                        $msg_type = 'error';
+                    } else {
+                        $taskType = 'SITE_TOGGLE_STATUS';
+                        $payload['new_status'] = ($site['status'] === 'active') ? 'inactive' : 'active';
+                    }
                     break;
                 case 'toggle_ssl':
                     $taskType = 'SSL_LETSENCRYPT';
                     break;
                 case 'delete':
-                    $taskType = 'SITE_DELETE';
+                    if ($siteId == 1) {
+                        $msg = "El sitio principal no puede ser eliminado.";
+                        $msg_type = 'error';
+                    } else {
+                        $taskType = 'SITE_DELETE';
+                    }
                     break;
             }
 
@@ -355,6 +365,7 @@ $sites = $pdo->query("
                     </td>
                     <td>
                         <div class="actions">
+                            <?php if ($s['id'] != 1): ?>
                             <form method="POST" style="display:inline;">
                                 <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                                 <input type="hidden" name="action" value="toggle_status">
@@ -362,14 +373,14 @@ $sites = $pdo->query("
                                     <?php echo ($s['status'] === 'active') ? 'Desactivar' : 'Activar'; ?>
                                 </button>
                             </form>
-                            <?php if ($s['id'] != 1): ?>
                             <form method="POST" style="display:inline;" onsubmit="return confirm('¿Estás seguro de eliminar el dominio <?php echo $s['domain']; ?>?');">
                                 <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                                 <input type="hidden" name="action" value="delete">
                                 <button type="submit" class="btn btn-outline btn-sm btn-danger" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>Eliminar</button>
                             </form>
                             <?php else: ?>
-                                <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede eliminar">Eliminar</button>
+                                <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede desactivar" disabled>Desactivar</button>
+                                <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede eliminar" disabled>Eliminar</button>
                             <?php endif; ?>
                             <a href="databases.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--info);">BBDD</a>
                         </div>

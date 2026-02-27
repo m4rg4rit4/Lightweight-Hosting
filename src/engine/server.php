@@ -280,6 +280,15 @@ foreach ($tasks as $task) {
 
         case 'SITE_TOGGLE_STATUS':
             $newStatus = $payload['new_status'];
+            
+            // Protección: el sitio principal (id=1) no se puede desactivar
+            $siteId = $payload['id'] ?? null;
+            if ($siteId == 1 && $newStatus === 'inactive') {
+                $msg = "Error: Site $domain (ID 1) cannot be disabled. Aborting.";
+                $success = false;
+                break;
+            }
+
             if ($newStatus === 'active') {
                 shell_exec("$cmd_a2ensite $domain.conf");
                 if (file_exists("/etc/apache2/sites-available/$domain-le-ssl.conf")) shell_exec("$cmd_a2ensite $domain-le-ssl.conf");
@@ -295,6 +304,14 @@ foreach ($tasks as $task) {
             break;
 
         case 'SITE_DELETE':
+            // Protección: el sitio principal (id=1) no se puede eliminar
+            $siteId = $payload['id'] ?? null;
+            if ($siteId == 1) {
+                $msg = "Error: Site $domain (ID 1) cannot be deleted. Aborting.";
+                $success = false;
+                break;
+            }
+
             shell_exec("$cmd_a2dissite $domain.conf 2>/dev/null");
             shell_exec("$cmd_a2dissite $domain-le-ssl.conf 2>/dev/null");
             
