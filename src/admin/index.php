@@ -179,7 +179,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
 <body>
     <div class="container">
         <nav>
-            <strong>Ingenia Hosting</strong>
+            <strong>Lightweight Hosting</strong>
             <a href="index.php">Sitios</a>
             <a href="<?php echo defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'dbadmin'; ?>/" target="_blank">Base de Datos</a>
         </nav>
