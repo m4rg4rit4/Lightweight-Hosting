@@ -160,7 +160,9 @@ ENGINE_PATH="/usr/local/bin/hosting"
 
 # Intentar recuperar configuración existente si es una actualización
 EXISTING_CONFIG="$ADMIN_PATH/config.php"
+ROOT_DB_PASS_FILE="/root/.hosting_db_root"
 IS_UPDATE=false
+
 if [ -f "$EXISTING_CONFIG" ]; then
     echo -e "${GREEN}Detectada instalación existente. Cargando configuración...${NC}"
     EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
@@ -176,8 +178,15 @@ if [ -f "$EXISTING_CONFIG" ]; then
     fi
 fi
 
-# Generar contraseña segura para Root
-DB_ROOT_PASS=$(openssl rand -base64 24)
+# Recuperar o generar contraseña de Root de MariaDB
+if [ -f "$ROOT_DB_PASS_FILE" ]; then
+    DB_ROOT_PASS=$(cat "$ROOT_DB_PASS_FILE")
+    echo -e "${GREEN}Contraseña de MariaDB Root recuperada.${NC}"
+else
+    DB_ROOT_PASS=$(openssl rand -base64 24)
+    echo "$DB_ROOT_PASS" > "$ROOT_DB_PASS_FILE"
+    chmod 600 "$ROOT_DB_PASS_FILE"
+fi
 
 # Optimización MariaDB para 1GB RAM
 if [ -d /etc/mysql/mariadb.conf.d/ ]; then
@@ -198,12 +207,17 @@ else
 fi
 
 # Configurar contraseña de root y seguridad básica
-echo -e "${YELLOW}Configurando seguridad de MariaDB...${NC}"
+echo -e "${YELLOW}Configurando acceso de MariaDB...${NC}"
 systemctl start mariadb
 
-# Establecer contraseña de root e inmediatamente crear un .my.cnf para que el script pueda seguir operando
-mariadb -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';"
+# Crear archivo temporal .my.cnf para operar durante la instalación
+# Probamos primero si podemos entrar sin contraseña (unix_socket)
+if mariadb -e "status" >/dev/null 2>&1; then
+    echo -e "${YELLOW}Configurando contraseña de root inicial...${NC}"
+    mariadb -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';"
+fi
 
+# Crear/Actualizar el .my.cnf para que el resto del script funcione
 cat <<EOF > /root/.my.cnf
 [client]
 user=root
