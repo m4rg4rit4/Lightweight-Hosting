@@ -16,6 +16,7 @@ description: Reglas y restricciones de hardware del proyecto
 - Configuración de Apache2 con mod_proxy_fcgi y aislamiento de PHP.
 - **Idempotencia del Instalador**: El script `install.sh` debe ser re-ejecutable. Debe detectar valores previos (FQDN, Email, contraseñas, gestor de BD) y persistir el acceso a MariaDB para evitar bloqueos en actualizaciones sucesivas.
 
+# Integridad del Instalador
+- **Sincronización**: Cada vez que se cree un nuevo archivo esencial (`.php`, `.template`, etc.) en `src/admin` o `src/engine`, es OBLIGATORIO actualizar el script `install.sh` para que incluya la descarga y copia de dicho archivo. De lo contrario, las nuevas instalaciones o actualizaciones fallarán por falta de dependencias.
 
-
-# Importante, acutalizar siempre la documentación
+# Importante, actualizar siempre la documentación
