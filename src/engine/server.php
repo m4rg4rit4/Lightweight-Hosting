@@ -210,22 +210,28 @@ foreach ($tasks as $task) {
                     $adminConf = "/etc/apache2/sites-available/000-admin.conf";
                     if (file_exists($adminConf)) {
                         $confContent = file_get_contents($adminConf);
-                        // Añadir directivas SSL para 8080 si no están ya presentes
+                        // Añadir directivas SSL para 8080 (opcional, aunque ahora preferimos 8090) y definitivamente para 8090
                         if (strpos($confContent, "SSLEngine on") === false) {
                             $certPath = "/etc/letsencrypt/live/$domain";
                             $sslPart = "\n    SSLEngine on\n";
                             $sslPart .= "    SSLCertificateFile $certPath/fullchain.pem\n";
                             $sslPart .= "    SSLCertificateKeyFile $certPath/privkey.pem\n";
-                            // Intentar incluir el archivo de opciones de SSL si existe
                             if (file_exists("/etc/letsencrypt/options-ssl-apache.conf")) {
                                 $sslPart .= "    Include /etc/letsencrypt/options-ssl-apache.conf\n";
                             }
                             
-                            // Insertar antes del cierre de VirtualHost
-                            $confContent = str_replace("</VirtualHost>", $sslPart . "</VirtualHost>", $confContent);
-                            file_put_contents($adminConf, $confContent);
-                            shell_exec($cmd_apache_reload);
-                            $msg .= " Admin panel SSL updated.";
+                            // Insertar solo en el bloque VirtualHost de 8090
+                            if (strpos($confContent, "<VirtualHost *:8090>") !== false) {
+                                // Buscamos el bloque de 8090 y su cierre </VirtualHost> más cercano
+                                $pattern = "/(<VirtualHost \*:8090>.*?)(<\/VirtualHost>)/s";
+                                $newContent = preg_replace($pattern, "$1$sslPart$2", $confContent, 1);
+                                if ($newContent) {
+                                    $confContent = $newContent;
+                                    file_put_contents($adminConf, $confContent);
+                                    shell_exec($cmd_apache_reload);
+                                    $msg .= " Admin panel SSL updated (Port 8090).";
+                                }
+                            }
                         }
                     }
                 }
