@@ -14,6 +14,7 @@ description: Reglas y restricciones de hardware del proyecto
 - **Seguridad**: Ningún proceso web (www-data) debe tener permisos de `sudo`. El motor de tareas (`server.php`) es el único con privilegios elevados.
 - Mantener compatibilidad con UTF-8 siempre (Powershell/Linux).
 - Configuración de Apache2 con mod_proxy_fcgi y aislamiento de PHP.
+- **Idempotencia del Instalador**: El script `install.sh` debe ser re-ejecutable. Debe detectar valores previos (FQDN, Email, contraseñas, gestor de BD) y persistir el acceso a MariaDB para evitar bloqueos en actualizaciones sucesivas.
 
 
 
