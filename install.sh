@@ -388,7 +388,7 @@ else
     chown -R www-data:www-data "$ADMIN_PATH/dbadmin"
 fi
 
-# Crear VirtualHost para el puerto 8080
+# Crear VirtualHost para el puerto 8080 (Admin + PHPMyAdmin)
 # Detectar el socket real de PHP para evitar fallos de versión
 REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock | head -n 1)
 
@@ -399,6 +399,10 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
     ErrorLog \${APACHE_LOG_DIR}/admin_error.log
     CustomLog \${APACHE_LOG_DIR}/admin_access.log combined
 
+    # Alias específico para que la raíz del 8080 pueda redirigir o tener acceso directo
+    Alias /phpmyadmin $ADMIN_PATH/phpmyadmin
+    Alias /dbadmin $ADMIN_PATH/dbadmin
+
     <Directory $ADMIN_PATH>
         Options -Indexes +FollowSymLinks
         AllowOverride All
@@ -407,13 +411,38 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
             SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
         </FilesMatch>
     </Directory>
+
+    # Configuración específica para el gestor de BD en 8080
+    <Directory $ADMIN_PATH/phpmyadmin>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    <Directory $ADMIN_PATH/dbadmin>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
 </VirtualHost>
 EOF
 
-# Configuración global para el gestor de BD (accesible desde cualquier dominio)
+# Configuración global para el gestor de BD (accesible desde cualquier dominio/subdominio)
 cat <<EOF > /etc/apache2/conf-available/hosting-dbmanager.conf
-Alias /$DB_MANAGER_DIR $ADMIN_PATH/$DB_MANAGER_DIR
-<Directory $ADMIN_PATH/$DB_MANAGER_DIR>
+# Alias globales para acceso desde cualquier sitio
+Alias /phpmyadmin $ADMIN_PATH/phpmyadmin
+Alias /dbadmin $ADMIN_PATH/dbadmin
+
+<Directory $ADMIN_PATH/phpmyadmin>
+    DirectoryIndex index.php
+    Options -Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+    <FilesMatch \.php$>
+        SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
+    </FilesMatch>
+</Directory>
+
+<Directory $ADMIN_PATH/dbadmin>
     DirectoryIndex index.php
     Options -Indexes +FollowSymLinks
     AllowOverride All
@@ -473,7 +502,9 @@ printf "MariaDB: Performance Schema OFF (Ahorro de RAM activo)\n"
 printf "\n"
 printf "${YELLOW}DATOS DE ACCESO IMPORTANTES:${NC}\n"
 printf "MariaDB Root Password: ${GREEN}$DB_ROOT_PASS${NC}\n"
-printf "Adminer URL: ${YELLOW}http://$FULL_FQDN:8080/dbadmin/${NC}\n"
+printf "Panel de Control:     ${YELLOW}http://$FULL_FQDN:8080/${NC}\n"
+printf "Gestor DB (Directo):  ${YELLOW}http://$FULL_FQDN:8080/$DB_MANAGER_DIR/${NC}\n"
+printf "Gestor DB (Alias):    ${YELLOW}http://$FULL_FQDN/$DB_MANAGER_DIR/${NC}\n"
 printf "Admin DB User: ${GREEN}dbadmin${NC}\n"
 printf "Admin DB Pass: ${GREEN}$DB_ADMIN_PASS${NC}\n"
 printf "Admin Config:  ${YELLOW}$ADMIN_PATH/config.php${NC}\n"

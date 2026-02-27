@@ -19,4 +19,3 @@ description: Reglas y restricciones de hardware del proyecto
 
 
 # Importante, acutalizar siempre la documentación
-

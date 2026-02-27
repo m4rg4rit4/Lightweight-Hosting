@@ -34,15 +34,32 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     $port = $is_ssl ? 443 : 80;
     $vhost = "<VirtualHost *:$port>\n";
     $vhost .= "    ServerName $domain\n";
-    $vhost .= "    ServerAlias www.$domain\n";
+    $vhost .= "    ServerAlias www.$domain pma.$domain phpmyadmin.$domain\n";
     $vhost .= "    DocumentRoot $document_root\n";
     $vhost .= "    ErrorLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_error.log\n";
     $vhost .= "    CustomLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_access.log combined\n\n";
     
+    // Soporte para subdominios mágicos phpmyadmin.dominio.com -> /phpmyadmin
+    $vhost .= "    RewriteEngine On\n";
+    $vhost .= "    RewriteCond %{HTTP_HOST} ^(pma|phpmyadmin)\. [NC]\n";
+    $vhost .= "    RewriteRule ^/(.*)$ /phpmyadmin/$1 [L,PT]\n\n";
+
     $vhost .= "    <Directory $document_root>\n";
     $vhost .= "        Options -Indexes +FollowSymLinks\n";
     $vhost .= "        AllowOverride All\n";
     $vhost .= "        Require all granted\n";
+    $vhost .= "    </Directory>\n\n";
+    
+    // DB Manager access (Global Alias)
+    $vhost .= "    Alias /phpmyadmin /var/www/admin_panel/phpmyadmin\n";
+    $vhost .= "    Alias /dbadmin /var/www/admin_panel/dbadmin\n";
+    $vhost .= "    <Directory /var/www/admin_panel/phpmyadmin>\n";
+    $vhost .= "        Options -Indexes +FollowSymLinks\n";
+    $vhost .= "        AllowOverride All\n";
+    $vhost .= "        Require all granted\n";
+    $vhost .= "        <FilesMatch \.php$>\n";
+    $vhost .= "            SetHandler \"proxy:unix:/run/php/php$php_v-fpm.sock|fcgi://localhost\"\n";
+    $vhost .= "        </FilesMatch>\n";
     $vhost .= "    </Directory>\n\n";
     
     if ($php_enabled) {
@@ -113,6 +130,8 @@ foreach ($tasks as $task) {
             $dnsOk = checkExternalDNS($domain, $publicIP);
             // Comprobamos www explícitamente con DNS de Google
             $dnsWwwOk = checkExternalDNS("www." . $domain, $publicIP);
+            $dnsPmaOk = checkExternalDNS("pma." . $domain, $publicIP);
+            $dnsPmaFullOk = checkExternalDNS("phpmyadmin." . $domain, $publicIP);
 
             if (!$dnsOk) {
                 // Volver a poner en pending para el siguiente minuto
@@ -123,12 +142,10 @@ foreach ($tasks as $task) {
             $email = defined('ADMIN_EMAIL') ? ADMIN_EMAIL : "admin@$domain";
             $domainsArg = "-d " . escapeshellarg($domain);
             
-            // Solo intentamos añadir www. si es un dominio principal (exactamente un punto)
-            // y si las DNS de www. apuntan a nuestra IP.
-            $dotCount = substr_count($domain, '.');
-            if ($dotCount === 1 && $dnsWwwOk) {
-                $domainsArg .= " -d " . escapeshellarg("www.$domain");
-            }
+            // Subdominios adicionales si las DNS apuntan a nuestra IP
+            if ($dnsWwwOk) $domainsArg .= " -d " . escapeshellarg("www.$domain");
+            if ($dnsPmaOk) $domainsArg .= " -d " . escapeshellarg("pma.$domain");
+            if ($dnsPmaFullOk) $domainsArg .= " -d " . escapeshellarg("phpmyadmin.$domain");
             
             // Usamos --keep-until-expiring para evitar que certbot falle si el cert ya es reciente
             $cmd = "certbot --apache $domainsArg --non-interactive --agree-tos --email " . escapeshellarg($email) . " --redirect --keep-until-expiring 2>&1";
