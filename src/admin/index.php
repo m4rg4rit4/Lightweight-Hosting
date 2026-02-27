@@ -383,6 +383,7 @@ $sites = $pdo->query("
                                 <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede eliminar" disabled>Eliminar</button>
                             <?php endif; ?>
                             <a href="databases.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--info);">BBDD</a>
+                            <a href="filemanager.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--warning);">Archivos</a>
                         </div>
                     </td>
                 </tr>
