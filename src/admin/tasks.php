@@ -3,7 +3,7 @@ require 'config.php';
 $pdo = getPDO();
 
 // Paginación o límite simple
-$tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50")->fetchAll();
+$tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 25")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="es">
