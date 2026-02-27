@@ -71,7 +71,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="60">
+    <!-- El refresco se maneja por AJAX ahora -->
     <title>Hosting Admin | Control Panel</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
@@ -172,8 +172,39 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
         .alert-success { background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2); }
         .alert-error { background: rgba(239, 68, 68, 0.1); color: var(--error); border-color: rgba(239, 68, 68, 0.2); }
         
-        .refresh-indicator { font-size: 0.8rem; color: var(--text-dim); text-align: right; margin-top: 20px; font-style: italic; }
         .actions { display: flex; gap: 8px; }
+        
+        /* Notificaciones de Tareas */
+        .notification-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto;
+            padding: 6px 14px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 20px;
+        }
+        .notification-dot {
+            width: 10px;
+            height: 10px;
+            background-color: var(--error);
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 12px var(--error);
+            animation: pulse-red 2s infinite;
+        }
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .pending-text {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text);
+            letter-spacing: 0.02em;
+        }
     </style>
 </head>
 <body>
@@ -182,6 +213,11 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
             <strong>Lightweight Hosting</strong>
             <a href="index.php">Sitios</a>
             <a href="<?php echo defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'dbadmin'; ?>/" target="_blank">Base de Datos</a>
+            
+            <div id="task-notification" style="display: none;" class="notification-container">
+                <span class="notification-dot"></span>
+                <span class="pending-text">TAREAS PENDIENTES</span>
+            </div>
         </nav>
         
         <h1>Añadir Nuevo Dominio</h1>
@@ -273,20 +309,37 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY created_at DESC")->fetchA
             </tbody>
         </table>
 
-        <div class="refresh-indicator" id="refresh-timer">
-            La página se actualizará automáticamente en <span id="seconds">60</span> segundos...
-        </div>
-    </div>
-
     <script>
-        let timeLeft = 60;
-        const timerElement = document.getElementById('seconds');
-        setInterval(() => {
-            if (timeLeft > 0) {
-                timeLeft--;
-                timerElement.innerText = timeLeft;
+        let lastPendingCount = -1;
+
+        async function checkTasks() {
+            try {
+                const response = await fetch('tasks_status.php');
+                const data = await response.json();
+                const currentCount = data.pending_count;
+
+                const notification = document.getElementById('task-notification');
+                if (currentCount > 0) {
+                    notification.style.display = 'flex';
+                } else {
+                    notification.style.display = 'none';
+                }
+
+                // Si antes había tareas y ahora no, refrescamos para mostrar los cambios
+                if (lastPendingCount > 0 && currentCount === 0) {
+                    location.reload();
+                }
+                
+                lastPendingCount = currentCount;
+            } catch (error) {
+                console.error('Error checking tasks:', error);
             }
-        }, 1000);
+        }
+
+        // Comprobar cada 5 segundos
+        setInterval(checkTasks, 5000);
+        // Comprobación inicial
+        checkTasks();
     </script>
 </body>
 </html>
