@@ -405,9 +405,21 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
 </VirtualHost>
 EOF
 
-# Desactivar alias antiguo y activar nuevo sitio
-rm -f /etc/apache2/conf-available/adminer.conf
-a2disconf adminer 2>/dev/null
+# Configuración global para el gestor de BD (accesible desde cualquier dominio)
+cat <<EOF > /etc/apache2/conf-available/hosting-dbmanager.conf
+Alias /$DB_MANAGER_DIR $ADMIN_PATH/$DB_MANAGER_DIR
+<Directory $ADMIN_PATH/$DB_MANAGER_DIR>
+    Options -Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+    <FilesMatch \.php$>
+        SetHandler "proxy:unix:/run/php/php${PHP_VERSION}-fpm.sock|fcgi://localhost"
+    </FilesMatch>
+</Directory>
+EOF
+
+# Activar configuraciones
+a2enconf hosting-dbmanager
 a2ensite 000-admin.conf
 
 # 13. Configuración del Motor de Tareas (Cron)
