@@ -327,11 +327,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .btn-danger:hover { background: rgba(239, 68, 68, 0.1); border-color: var(--error); }
         .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
 
-        table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 8px; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 8px; }
         th { text-align: left; padding: 12px 16px; border-bottom: 2px solid var(--border); color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; background: rgba(0,0,0,0.1); }
+        th:first-child { border-top-left-radius: 8px; }
+        th:last-child { border-top-right-radius: 8px; }
         td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
         tr:hover { background: rgba(255,255,255,0.02); }
         tr:last-child td { border-bottom: none; }
+        tr:last-child td:first-child { border-bottom-left-radius: 8px; }
+        tr:last-child td:last-child { border-bottom-right-radius: 8px; }
         
         .file-icon { font-size: 1.2rem; margin-right: 8px; width: 20px; text-align: center; display: inline-block; }
         .dir-row { color: var(--info); font-weight: 600; cursor: pointer; }
