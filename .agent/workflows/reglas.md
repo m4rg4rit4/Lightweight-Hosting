@@ -19,4 +19,7 @@ description: Reglas y restricciones de hardware del proyecto
 # Integridad del Instalador
 - **Sincronización**: Cada vez que se cree un nuevo archivo esencial (`.php`, `.template`, etc.) en `src/admin` o `src/engine`, es OBLIGATORIO actualizar el script `install.sh` para que incluya la descarga y copia de dicho archivo. De lo contrario, las nuevas instalaciones o actualizaciones fallarán por falta de dependencias.
 
+# Gestión de Repositorio
+- **GitHub**: Es OBLIGATORIO subir todos los cambios al repositorio de GitHub al finalizar cada sesión de trabajo o tras implementar una funcionalidad clave.
+
 # Importante, actualizar siempre la documentación
