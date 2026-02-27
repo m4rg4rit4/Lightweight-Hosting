@@ -14,21 +14,21 @@ REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
 ADMIN_PATH="/var/www/admin_panel"
 ENGINE_PATH="/usr/local/bin/hosting"
 
-echo -e "${YELLOW}Actualizando archivos desde GitHub...${NC}"
+printf "${YELLOW}Actualizando archivos desde GitHub...${NC}\n"
 
 # 1. Actualizar Panel de Administración
-echo -e "${YELLOW}Actualizando interfaz (protegiendo config.php)...${NC}"
+printf "${YELLOW}Actualizando interfaz (protegiendo config.php)...${NC}\n"
 mkdir -p $ADMIN_PATH
 curl -sSL "$REPO_RAW/src/admin/index.php" -o "$ADMIN_PATH/index.php"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$ADMIN_PATH/config.php.template"
-echo -e "${GREEN}- Interfaz de administración actualizada en $ADMIN_PATH${NC}"
+printf "${GREEN}- Interfaz de administración actualizada en $ADMIN_PATH${NC}\n"
 
 # 2. Actualizar Motor de Tareas
-echo -e "${YELLOW}Actualizando motor de tareas...${NC}"
+printf "${YELLOW}Actualizando motor de tareas...${NC}\n"
 mkdir -p $ENGINE_PATH
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$ENGINE_PATH/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$ENGINE_PATH/index.html.template"
-echo -e "${GREEN}- Motor de tareas actualizado en $ENGINE_PATH${NC}"
+printf "${GREEN}- Motor de tareas actualizado en $ENGINE_PATH${NC}\n"
 
 # Ajustar permisos de propiedad y ejecución
 chown -R www-data:www-data $ADMIN_PATH
@@ -43,6 +43,6 @@ fi
 # Limpieza final
 rm -rf $TEMP_DIR /tmp/hosting.tar.gz
 
-echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN} Proceso de despliegue de archivos completado.${NC}"
-echo -e "${GREEN}====================================================${NC}"
+printf "${GREEN}====================================================${NC}\n"
+printf "${GREEN} Proceso de despliegue de archivos completado.${NC}\n"
+printf "${GREEN}====================================================${NC}\n"
