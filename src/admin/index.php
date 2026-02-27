@@ -65,7 +65,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
+$sites = $pdo->query("
+    SELECT s.*, 
+    (SELECT COUNT(*) FROM sys_tasks t 
+     WHERE t.status IN ('pending', 'running') 
+     AND (JSON_EXTRACT(t.payload, '$.domain') = s.domain OR JSON_EXTRACT(t.payload, '$.domain') = CONCAT('\"', s.domain, '\"'))) as is_processing
+    FROM sys_sites s 
+    ORDER BY s.id ASC
+")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -262,7 +269,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
                         <form method="POST" style="display:inline;">
                             <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                             <input type="hidden" name="action" value="toggle_php">
-                            <button type="submit" class="btn btn-outline btn-sm">
+                            <button type="submit" class="btn btn-outline btn-sm" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>
                                 <?php if ($s['php_enabled'] == 1): ?>
                                     <span style="color: var(--success);">●</span> Activo
                                 <?php else: ?>
@@ -275,7 +282,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
                         <form method="POST" style="display:inline;">
                             <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                             <input type="hidden" name="action" value="toggle_ssl">
-                            <button type="submit" class="btn btn-outline btn-sm" <?php echo ($s['status'] !== 'active') ? 'disabled' : ''; ?>>
+                            <button type="submit" class="btn btn-outline btn-sm" <?php echo ($s['status'] !== 'active' || $s['is_processing'] > 0) ? 'disabled' : ''; ?>>
                                 <?php if ($s['ssl_enabled'] == 1): ?>
                                     <span style="color: var(--success);">🔒</span> Protegido
                                 <?php else: ?>
@@ -284,13 +291,19 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
                             </button>
                         </form>
                     </td>
-                    <td><span class="badge badge-<?php echo $s['status']; ?>"><?php echo $s['status']; ?></span></td>
+                    <td>
+                        <?php if ($s['is_processing'] > 0): ?>
+                            <span class="badge badge-running">Procesando...</span>
+                        <?php else: ?>
+                            <span class="badge badge-<?php echo $s['status']; ?>"><?php echo $s['status']; ?></span>
+                        <?php endif; ?>
+                    </td>
                     <td>
                         <div class="actions">
                             <form method="POST" style="display:inline;">
                                 <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                                 <input type="hidden" name="action" value="toggle_status">
-                                <button type="submit" class="btn btn-outline btn-sm">
+                                <button type="submit" class="btn btn-outline btn-sm" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>
                                     <?php echo ($s['status'] === 'active') ? 'Desactivar' : 'Activar'; ?>
                                 </button>
                             </form>
@@ -298,7 +311,7 @@ $sites = $pdo->query("SELECT * FROM sys_sites ORDER BY id ASC")->fetchAll();
                             <form method="POST" style="display:inline;" onsubmit="return confirm('¿Estás seguro de eliminar el dominio <?php echo $s['domain']; ?>?');">
                                 <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                                 <input type="hidden" name="action" value="delete">
-                                <button type="submit" class="btn btn-outline btn-sm btn-danger">Eliminar</button>
+                                <button type="submit" class="btn btn-outline btn-sm btn-danger" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>Eliminar</button>
                             </form>
                             <?php else: ?>
                                 <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede eliminar">Eliminar</button>
