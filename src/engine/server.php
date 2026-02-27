@@ -104,6 +104,21 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     return $vhost;
 }
 
+// --- Inicialización de Tablas adicionales (Migraciones ligeras) ---
+try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS sys_databases (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        site_id INT NOT NULL,
+        db_name VARCHAR(64) NOT NULL UNIQUE,
+        db_user VARCHAR(32) NOT NULL,
+        db_pass VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX (site_id)
+    )");
+} catch (Exception $e) {
+    // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root
+}
+
 // 1. Buscar tareas pendientes
 $stmt = $pdo->prepare("SELECT * FROM sys_tasks WHERE status = 'pending' ORDER BY created_at ASC");
 $stmt->execute();
@@ -300,7 +315,77 @@ foreach ($tasks as $task) {
             }
             
             $pdo->prepare("DELETE FROM sys_sites WHERE domain = ?")->execute([$domain]);
-            $msg = "Site $domain deleted completely.";
+            
+            // 4. Limpiar bases de datos asociadas
+            $dbs = $pdo->prepare("SELECT db_name, db_user FROM sys_databases WHERE site_id = ?");
+            $dbs->execute([$siteId]);
+            $associatedDbs = $dbs->fetchAll();
+            
+            $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+            $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+            
+            foreach ($associatedDbs as $db) {
+                shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `{$db['db_name']}`;"));
+                shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '{$db['db_user']}'@'127.0.0.1';"));
+            }
+            $pdo->prepare("DELETE FROM sys_databases WHERE site_id = ?")->execute([$siteId]);
+
+            $msg = "Site $domain and its databases deleted completely.";
+            $success = true;
+            break;
+
+        case 'DB_CREATE':
+            $dbName = $payload['db_name'];
+            $dbUser = $payload['db_user'];
+            $dbPass = $payload['db_pass'];
+            $siteId = $payload['site_id'];
+            
+            $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+            $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+            
+            // 1. Crear DB
+            shell_exec("mariadb $auth -e " . escapeshellarg("CREATE DATABASE IF NOT EXISTS `$dbName`;"));
+            // 2. Crear Usuario y Permisos (usando Identificado por para compatibilidad)
+            shell_exec("mariadb $auth -e " . escapeshellarg("CREATE USER IF NOT EXISTS '$dbUser'@'127.0.0.1' IDENTIFIED BY '$dbPass';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `$dbName`.* TO '$dbUser'@'127.0.0.1';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
+            
+            $pdo->prepare("INSERT INTO sys_databases (site_id, db_name, db_user, db_pass) VALUES (?, ?, ?, ?)")
+                ->execute([$siteId, $dbName, $dbUser, $dbPass]);
+            
+            $msg = "Database $dbName created and assigned to site ID $siteId.";
+            $success = true;
+            break;
+
+        case 'DB_DELETE':
+            $dbName = $payload['db_name'];
+            $dbUser = $payload['db_user'];
+            
+            $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+            $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+            
+            shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `$dbName`;"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$dbUser'@'127.0.0.1';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
+            
+            $pdo->prepare("DELETE FROM sys_databases WHERE db_name = ?")->execute([$dbName]);
+            $msg = "Database $dbName deleted.";
+            $success = true;
+            break;
+
+        case 'DB_CHANGE_PASSWORD':
+            $dbUser = $payload['db_user'];
+            $newPass = $payload['new_pass'];
+            $dbName = $payload['db_name'];
+            
+            $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+            $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+            
+            shell_exec("mariadb $auth -e " . escapeshellarg("ALTER USER '$dbUser'@'127.0.0.1' IDENTIFIED BY '$newPass';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
+            
+            $pdo->prepare("UPDATE sys_databases SET db_pass = ? WHERE db_user = ? AND db_name = ?")->execute([$newPass, $dbUser, $dbName]);
+            $msg = "Password changed for database user $dbUser.";
             $success = true;
             break;
 

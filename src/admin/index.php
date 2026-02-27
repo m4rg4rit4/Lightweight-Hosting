@@ -371,6 +371,7 @@ $sites = $pdo->query("
                             <?php else: ?>
                                 <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede eliminar">Eliminar</button>
                             <?php endif; ?>
+                            <a href="databases.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--info);">BBDD</a>
                         </div>
                     </td>
                 </tr>

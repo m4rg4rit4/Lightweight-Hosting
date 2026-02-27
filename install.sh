@@ -271,6 +271,17 @@ mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_sites (
     status ENUM('active', 'inactive', 'pending', 'ssl_pending') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );"
+
+# Crear tabla de bases de datos
+mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_databases (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    site_id INT NOT NULL,
+    db_name VARCHAR(64) NOT NULL UNIQUE,
+    db_user VARCHAR(32) NOT NULL,
+    db_pass VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX (site_id)
+);"
 mariadb -e "FLUSH PRIVILEGES;"
 
 # Crear primer sitio (el host principal)
