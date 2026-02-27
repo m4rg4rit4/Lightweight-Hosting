@@ -121,8 +121,8 @@ cat <<EOF > /etc/apache2/mods-available/mpm_event.conf
 EOF
 
 # 9. Instalación de PHP-FPM (Modo OnDemand para RAM)
-echo -e "${YELLOW}Instalando PHP-FPM...${NC}"
-apt install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip || { echo -e "${RED}Error al instalar PHP.${NC}"; exit 1; }
+echo -e "${YELLOW}Instalando PHP-FPM y extensiones necesarias...${NC}"
+apt install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip php-bcmath php-intl || { echo -e "${RED}Error al instalar PHP.${NC}"; exit 1; }
 
 # Detección robusta de la versión de PHP instalada
 PHP_VERSION=$(ls /etc/php/ | grep -E '^[0-9.]+$' | head -n 1)
@@ -388,9 +388,13 @@ else
 fi
 
 # Crear VirtualHost para el puerto 8080
+# Detectar el socket real de PHP para evitar fallos de versión
+REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock | head -n 1)
+
 cat <<EOF > /etc/apache2/sites-available/000-admin.conf
 <VirtualHost *:8080>
     DocumentRoot $ADMIN_PATH
+    DirectoryIndex index.php
     ErrorLog \${APACHE_LOG_DIR}/admin_error.log
     CustomLog \${APACHE_LOG_DIR}/admin_access.log combined
 
@@ -399,7 +403,7 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
         AllowOverride All
         Require all granted
         <FilesMatch \.php$>
-            SetHandler "proxy:unix:/run/php/php${PHP_VERSION}-fpm.sock|fcgi://localhost"
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
         </FilesMatch>
     </Directory>
 </VirtualHost>
@@ -409,11 +413,12 @@ EOF
 cat <<EOF > /etc/apache2/conf-available/hosting-dbmanager.conf
 Alias /$DB_MANAGER_DIR $ADMIN_PATH/$DB_MANAGER_DIR
 <Directory $ADMIN_PATH/$DB_MANAGER_DIR>
+    DirectoryIndex index.php
     Options -Indexes +FollowSymLinks
     AllowOverride All
     Require all granted
     <FilesMatch \.php$>
-        SetHandler "proxy:unix:/run/php/php${PHP_VERSION}-fpm.sock|fcgi://localhost"
+        SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
     </FilesMatch>
 </Directory>
 EOF
