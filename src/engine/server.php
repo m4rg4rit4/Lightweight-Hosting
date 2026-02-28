@@ -499,9 +499,9 @@ foreach ($tasks as $task) {
             // Symlink to save space during tar (dereference with -h)
             symlink($docRoot, "$tmpDir/webroot");
             
-            $tarCmd = "tar -czfh " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json webroot";
+            $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json webroot";
             if (file_exists("$tmpDir/database.sql.gz")) {
-                $tarCmd = "tar -czfh " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json database.sql.gz webroot";
+                $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json database.sql.gz webroot";
             }
             shell_exec($tarCmd);
             
