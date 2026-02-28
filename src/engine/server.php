@@ -428,6 +428,7 @@ foreach ($tasks as $task) {
             $outStr = implode(" ", $output);
             if ($resultCode === 0 || strpos($outStr, 'Already logged in') !== false || strpos($outStr, 'Login completed') !== false) {
                 $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('mega_email', ?)")->execute([$payload['email']]);
+                $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('mega_status', 'logged_in')")->execute();
                 $msg = "MEGA account linked successfully.";
                 $success = true;
             } else {
@@ -439,6 +440,7 @@ foreach ($tasks as $task) {
         case 'MEGA_LOGOUT':
             exec("/usr/bin/mega-logout 2>&1", $output, $resultCode);
             $pdo->prepare("DELETE FROM sys_settings WHERE setting_key = 'mega_email'")->execute();
+            $pdo->prepare("DELETE FROM sys_settings WHERE setting_key = 'mega_status'")->execute();
             $msg = "MEGA account logged out.";
             $success = true;
             break;
