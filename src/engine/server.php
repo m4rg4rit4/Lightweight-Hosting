@@ -445,6 +445,74 @@ foreach ($tasks as $task) {
             $success = true;
             break;
 
+        case 'MEGA_SYNC_BACKUPS':
+            $sites = $pdo->query("SELECT id, domain FROM sys_sites")->fetchAll();
+            $added = 0;
+            $kept = 0;
+            $removed = 0;
+            
+            foreach ($sites as $site) {
+                $siteId = $site['id'];
+                $domain = $site['domain'];
+                $megaPath = "/Backups/{$domain}";
+                
+                exec("/usr/bin/mega-ls " . escapeshellarg($megaPath) . " 2>&1", $outMega, $resMega);
+                
+                $megaFiles = [];
+                if ($resMega === 0) {
+                    foreach ($outMega as $line) {
+                        $line = trim($line);
+                        // The output of mega-ls might just be filenames if run without -l
+                        if (strpos($line, 'backup_') === 0 && strpos($line, '.tar.gz') !== false) {
+                            $megaFiles[] = $line;
+                        }
+                    }
+                }
+                
+                // Get local backups for this site
+                $localBackups = $pdo->prepare("SELECT id, filename FROM sys_backups WHERE site_id = ?");
+                $localBackups->execute([$siteId]);
+                $local = $localBackups->fetchAll(PDO::FETCH_ASSOC);
+                
+                $localMap = [];
+                foreach ($local as $l) {
+                    $localMap[$l['filename']] = $l['id'];
+                }
+                
+                $foundMap = [];
+                foreach ($megaFiles as $filename) {
+                    $foundMap[$filename] = true;
+                    if (!isset($localMap[$filename])) {
+                        $dateStr = date('Y-m-d H:i:s');
+                        if (preg_match('/backup_.*_(\d{8})_(\d{6})\.tar\.gz/', $filename, $matches)) {
+                            $d = $matches[1];
+                            $t = $matches[2];
+                            $dateStr = substr($d,0,4).'-'.substr($d,4,2).'-'.substr($d,6,2).' '.substr($t,0,2).':'.substr($t,2,2).':'.substr($t,4,2);
+                        }
+                        
+                        $pdo->prepare("INSERT INTO sys_backups (site_id, filename, mega_path, status, created_at) VALUES (?, ?, ?, 'completed', ?)")
+                            ->execute([$siteId, $filename, $megaPath, $dateStr]);
+                        $added++;
+                    } else {
+                        $kept++;
+                    }
+                }
+                
+                // Remove local DB records that are no longer in MEGA
+                foreach ($localMap as $filename => $bId) {
+                    if (!isset($foundMap[$filename])) {
+                        $pdo->prepare("DELETE FROM sys_backups WHERE id = ?")->execute([$bId]);
+                        $removed++;
+                    }
+                }
+                
+                $outMega = []; // reset for next iteration
+            }
+            
+            $msg = "Sincronización de MEGA completada. Añadidas: $added, Alcanzadas: $kept, Eliminadas locales: $removed.";
+            $success = true;
+            break;
+
         case 'SITE_BACKUP':
             $siteId = $payload['site_id'];
             $site = $pdo->prepare("SELECT domain, document_root FROM sys_sites WHERE id = ?");

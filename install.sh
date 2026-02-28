@@ -365,6 +365,7 @@ curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.tem
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
 curl -sSL "$REPO_RAW/src/engine/sync_monitor.sh" -o "$TEMP_DIR/sync_monitor.sh"
+curl -sSL "$REPO_RAW/src/engine/auto_backup.php" -o "$TEMP_DIR/auto_backup.php"
 curl -sSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh"
 
 if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks.php" ] || [ ! -f "$TEMP_DIR/tasks_status.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
@@ -384,6 +385,7 @@ cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
 cp "$TEMP_DIR/sync_monitor.sh" "$ENGINE_PATH/sync_monitor.sh"
+cp "$TEMP_DIR/auto_backup.php" "$ENGINE_PATH/auto_backup.php"
 cp "$TEMP_DIR/installadmin.sh" "./installadmin.sh"
 chmod +x ./installadmin.sh
 
@@ -577,6 +579,7 @@ a2ensite 000-admin.conf
 printf "${YELLOW}Configurando motor de tareas y cronjob...${NC}\n"
 chmod 700 $ENGINE_PATH/server.php
 chmod 700 $ENGINE_PATH/sync_monitor.sh
+chmod 700 $ENGINE_PATH/auto_backup.php
 
 # Configurar Cron (Comprobando si ya existe)
 if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/server.php"; then
@@ -591,6 +594,14 @@ if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/sync_monitor.sh"; then
 else
     (crontab -l 2>/dev/null; echo "* * * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /bin/bash $ENGINE_PATH/sync_monitor.sh > /dev/null 2>&1") | crontab -
     printf "${GREEN}Cronjob del monitor de sync añadido con éxito.${NC}\n"
+fi
+
+# Configurar Auto-Backup (Diariamente a las 03:00)
+if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/auto_backup.php"; then
+    printf "${GREEN}El cronjob de auto_backup ya está configurado. Saltando.${NC}\n"
+else
+    (crontab -l 2>/dev/null; echo "0 3 * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /usr/bin/php $ENGINE_PATH/auto_backup.php >> /var/log/hosting_backup.log 2>&1") | crontab -
+    printf "${GREEN}Cronjob de auto_backup añadido con éxito (Diariamente a las 03:00).${NC}\n"
 fi
 
 # 14. Limpieza final de DISCO

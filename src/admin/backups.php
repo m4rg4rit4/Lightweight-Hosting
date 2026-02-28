@@ -26,6 +26,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = "Petición para desvincular MEGA enviada.";
                 $msg_type = 'info';
                 break;
+            case 'mega_sync':
+                $pdo->prepare("INSERT INTO sys_tasks (task_type, payload) VALUES ('MEGA_SYNC_BACKUPS', '{}')")->execute();
+                $msg = "Petición de sincronización enviada. Buscando copias en MEGA...";
+                $msg_type = 'info';
+                break;
             case 'set_retention':
                 $days = (int)($_POST['retention_days'] ?? 7);
                 $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('backup_retention_days', ?)")->execute([$days]);
@@ -238,6 +243,11 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
                                 <input type="number" name="retention_days" value="<?php echo htmlspecialchars($retentionDays); ?>" style="width: 80px; padding: 6px 10px;" min="1" max="365">
                                 <button type="submit" class="btn btn-outline btn-sm">Guardar</button>
                             </div>
+                        </form>
+                        
+                        <form method="POST" onsubmit="return confirm('¿Seguro que quieres buscar y sincronizar copias antiguas desde MEGA?');">
+                            <input type="hidden" name="action" value="mega_sync">
+                            <button type="submit" class="btn btn-outline btn-sm">Sincronizar</button>
                         </form>
                         
                         <form method="POST" onsubmit="return confirm('¿Seguro que quieres desvincular MEGA? No se podrán hacer ni restaurar backups.');">
