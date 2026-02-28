@@ -446,30 +446,64 @@ foreach ($tasks as $task) {
             break;
 
         case 'MEGA_SYNC_BACKUPS':
-            $sites = $pdo->query("SELECT id, domain FROM sys_sites")->fetchAll();
+            // 1. Escanear la carpeta raíz de backups en MEGA
+            exec("/usr/bin/mega-ls /Backups/ 2>&1", $outMegaRoot, $resMegaRoot);
+            
+            $megaDomains = [];
+            if ($resMegaRoot === 0) {
+                foreach ($outMegaRoot as $line) {
+                    $domain = trim($line);
+                    // Validar que parece un dominio (contiene punto, no contiene espacios)
+                    if (strpos($domain, '.') !== false && strpos($domain, ' ') === false) {
+                        $megaDomains[] = $domain;
+                    }
+                }
+            }
+            
             $added = 0;
             $kept = 0;
             $removed = 0;
+            $sitesRecreated = 0;
             
-            foreach ($sites as $site) {
-                $siteId = $site['id'];
-                $domain = $site['domain'];
-                $megaPath = "/Backups/{$domain}";
+            foreach ($megaDomains as $domain) {
+                // Verificar si existe el sitio localmente
+                $siteChk = $pdo->prepare("SELECT id FROM sys_sites WHERE domain = ?");
+                $siteChk->execute([$domain]);
+                $siteId = $siteChk->fetchColumn();
                 
+                if (!$siteId) {
+                    // El sitio está en MEGA pero no existe localmente -> Auto-Recuperación
+                    $docRoot = "/var/www/vhosts/" . $domain;
+                    $pdo->prepare("INSERT INTO sys_sites (domain, document_root, php_enabled, status) VALUES (?, ?, 1, 'pending')")
+                        ->execute([$domain, $docRoot]);
+                    $siteId = $pdo->lastInsertId();
+                    
+                    // Encolar su creación
+                    $payloadCreate = json_encode(['domain' => $domain, 'path' => $docRoot, 'php_enabled' => 1]);
+                    $pdo->prepare("INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SITE_CREATE', ?, 'pending')")
+                        ->execute([$payloadCreate]);
+                        
+                    $sitesRecreated++;
+                    echo "Auto-recreating missing site from MEGA: $domain (ID: $siteId)\n";
+                }
+                
+                // Sincronizar Backups para este dominio
+                $megaPath = "/Backups/{$domain}";
                 exec("/usr/bin/mega-ls " . escapeshellarg($megaPath) . " 2>&1", $outMega, $resMega);
                 
                 $megaFiles = [];
                 if ($resMega === 0) {
                     foreach ($outMega as $line) {
                         $line = trim($line);
-                        // The output of mega-ls might just be filenames if run without -l
                         if (strpos($line, 'backup_') === 0 && strpos($line, '.tar.gz') !== false) {
                             $megaFiles[] = $line;
                         }
                     }
                 }
                 
-                // Get local backups for this site
+                // Limpiar salida para la siguiente iteración
+                $outMega = []; 
+                
                 $localBackups = $pdo->prepare("SELECT id, filename FROM sys_backups WHERE site_id = ?");
                 $localBackups->execute([$siteId]);
                 $local = $localBackups->fetchAll(PDO::FETCH_ASSOC);
@@ -505,11 +539,9 @@ foreach ($tasks as $task) {
                         $removed++;
                     }
                 }
-                
-                $outMega = []; // reset for next iteration
             }
             
-            $msg = "Sincronización de MEGA completada. Añadidas: $added, Alcanzadas: $kept, Eliminadas locales: $removed.";
+            $msg = "Sync completado. Sitios auto-recuperados: $sitesRecreated. Copias añadidas: $added, Alcanzadas: $kept, Eliminadas locales: $removed.";
             $success = true;
             break;
 
