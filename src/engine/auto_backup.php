@@ -23,8 +23,18 @@ if ($megaStatus !== 'logged_in') {
     exit(0);
 }
 
-// 2. Fetch all active sites
-$stmt = $pdo->prepare("SELECT id, domain FROM sys_sites WHERE status = 'active'");
+// 2. Determine frequency based on current day
+// 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+$isSunday = (date('w') == 0);
+
+// We want sites where backup_frequency is 'daily', OR 'weekly' if today is Sunday
+$query = "SELECT id, domain FROM sys_sites WHERE status = 'active' AND (backup_frequency = 'daily'";
+if ($isSunday) {
+    $query .= " OR backup_frequency = 'weekly'";
+}
+$query .= ")";
+
+$stmt = $pdo->prepare($query);
 $stmt->execute();
 $sites = $stmt->fetchAll();
 

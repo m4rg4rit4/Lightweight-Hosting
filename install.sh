@@ -281,6 +281,7 @@ mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_sites (
     document_root VARCHAR(255) NOT NULL,
     php_enabled BOOLEAN DEFAULT 1,
     ssl_enabled BOOLEAN DEFAULT 0,
+    backup_frequency ENUM('none', 'daily', 'weekly') DEFAULT 'none',
     status ENUM('active', 'inactive', 'pending', 'ssl_pending') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );"

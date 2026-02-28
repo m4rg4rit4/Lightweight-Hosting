@@ -37,6 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = "Retención configurada a $days días.";
                 $msg_type = 'success';
                 break;
+            case 'set_frequency':
+                $siteId = (int)$_POST['site_id'];
+                $freq = $_POST['frequency'] ?? 'none';
+                if (in_array($freq, ['none', 'daily', 'weekly'])) {
+                    $pdo->prepare("UPDATE sys_sites SET backup_frequency = ? WHERE id = ?")->execute([$freq, $siteId]);
+                    $msg = "Frecuencia de copia actualizada.";
+                    $msg_type = 'success';
+                }
+                break;
             case 'backup_now':
                 $siteId = (int)$_POST['site_id'];
                 $payload = json_encode(['site_id' => $siteId]);
@@ -290,11 +299,24 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
                     <strong style="font-size: 1.1rem;"><?php echo htmlspecialchars($site['domain']); ?></strong>
                     <div style="font-size: 0.8rem; color: var(--text-dim);">DocRoot: <?php echo htmlspecialchars($site['document_root']); ?></div>
                 </div>
-                <form method="POST">
-                    <input type="hidden" name="action" value="backup_now">
-                    <input type="hidden" name="site_id" value="<?php echo $site['id']; ?>">
-                    <button type="submit" class="btn btn-primary btn-sm" <?php echo (!$megaEmail || $megaStatus !== 'logged_in') ? 'disabled style="opacity:0.5"' : ''; ?>>+ Copia Ahora</button>
-                </form>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <form method="POST" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="hidden" name="action" value="set_frequency">
+                        <input type="hidden" name="site_id" value="<?php echo $site['id']; ?>">
+                        <label style="margin:0; font-size: 0.8rem;">Auto:</label>
+                        <select name="frequency" onchange="this.form.submit()" style="padding: 4px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: inherit; font-size: 0.8rem;">
+                            <option value="none" <?php echo ($site['backup_frequency'] ?? 'none') === 'none' ? 'selected' : ''; ?>>Nunca</option>
+                            <option value="daily" <?php echo ($site['backup_frequency'] ?? '') === 'daily' ? 'selected' : ''; ?>>Diaria</option>
+                            <option value="weekly" <?php echo ($site['backup_frequency'] ?? '') === 'weekly' ? 'selected' : ''; ?>>Semanal (Dom)</option>
+                        </select>
+                    </form>
+                    
+                    <form method="POST">
+                        <input type="hidden" name="action" value="backup_now">
+                        <input type="hidden" name="site_id" value="<?php echo $site['id']; ?>">
+                        <button type="submit" class="btn btn-primary btn-sm" <?php echo (!$megaEmail || $megaStatus !== 'logged_in') ? 'disabled style="opacity:0.5"' : ''; ?>>+ Copia Ahora</button>
+                    </form>
+                </div>
             </div>
             <div class="site-body">
                 <?php if (empty($site['backups'])): ?>
