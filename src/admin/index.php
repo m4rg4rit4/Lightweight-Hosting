@@ -19,6 +19,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         
+        $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM sys_sites WHERE domain = ?");
+        $stmt_check->execute([$domain]);
+        if ($stmt_check->fetchColumn() > 0) {
+            $_SESSION['flash_msg'] = "Error: El dominio '$domain' ya está dado de alta en el sistema.";
+            $_SESSION['flash_type'] = "error";
+            header("Location: " . $_SERVER['PHP_SELF'] . '?new=1');
+            exit;
+        }
+        
         if ($domain) {
             try {
                 $stmt = $pdo->prepare("INSERT INTO sys_sites (domain, document_root, php_enabled) VALUES (?, ?, ?)");

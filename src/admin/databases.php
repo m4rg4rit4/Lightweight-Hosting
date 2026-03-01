@@ -38,6 +38,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM sys_databases WHERE db_name = ? OR db_user = ?");
+            $stmt_check->execute([$dbName, $dbUser]);
+            if ($stmt_check->fetchColumn() > 0) {
+                $_SESSION['flash_msg'] = "Error: La base de datos '$dbName' o el usuario '$dbUser' ya existen en el sistema.";
+                $_SESSION['flash_type'] = "error";
+                header("Location: databases.php?site_id=$siteId");
+                exit;
+            }
+            
             if ($dbName && $dbUser && $dbPass) {
                 $payload = json_encode([
                     'site_id' => $siteId,
