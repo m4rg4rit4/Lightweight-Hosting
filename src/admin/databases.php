@@ -27,9 +27,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'];
         
         if ($action === 'create_db') {
-            $dbName = filter_var($_POST['db_name'], FILTER_SANITIZE_SPECIAL_CHARS);
-            $dbUser = filter_var($_POST['db_user'], FILTER_SANITIZE_SPECIAL_CHARS);
+            $dbName = trim($_POST['db_name']);
+            $dbUser = trim($_POST['db_user']);
             $dbPass = $_POST['db_pass'];
+            
+            if (!preg_match('/^[a-zA-Z0-9_]+$/', $dbName) || !preg_match('/^[a-zA-Z0-9_]+$/', $dbUser) || strlen($dbName) > 64 || strlen($dbUser) > 32) {
+                $_SESSION['flash_msg'] = "Error: El nombre de la base de datos o usuario contiene caracteres no válidos (solo letras, números y _).";
+                $_SESSION['flash_type'] = "error";
+                header("Location: databases.php?site_id=$siteId");
+                exit;
+            }
             
             if ($dbName && $dbUser && $dbPass) {
                 $payload = json_encode([

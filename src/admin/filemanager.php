@@ -28,10 +28,11 @@ if (!is_dir($baseDir)) {
 function getValidPath($baseDir, $requestedPath) {
     $requestedPath = ltrim($requestedPath, '/');
     $fullPath = realpath($baseDir . '/' . $requestedPath);
+    $realBase = realpath($baseDir);
     if ($requestedPath === '' || $requestedPath === '.') {
-        return $baseDir;
+        return $realBase;
     }
-    if ($fullPath && strpos($fullPath, realpath($baseDir)) === 0) {
+    if ($fullPath && ($fullPath === $realBase || strpos($fullPath, $realBase . DIRECTORY_SEPARATOR) === 0)) {
         return $fullPath;
     }
     return false;
@@ -138,7 +139,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newItemPath = rtrim($parentDir, '/') . '/' . basename($name);
                 
                 // Prevent path traversal in name
-                if (strpos($newItemPath, realpath($baseDir)) !== 0) {
+                $realBase = realpath($baseDir);
+                if ($newItemPath !== $realBase && strpos($newItemPath, $realBase . DIRECTORY_SEPARATOR) !== 0) {
                     throw new Exception("Operación no permitida.");
                 }
                 

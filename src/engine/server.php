@@ -180,7 +180,8 @@ foreach ($tasks as $task) {
                 }
             }
             file_put_contents("/etc/apache2/sites-available/$domain.conf", generateVhost($domain, $path, $php, $php_v));
-            shell_exec("$cmd_a2ensite $domain.conf && $cmd_apache_reload");
+            $safeDomainConf = escapeshellarg("$domain.conf");
+            shell_exec("$cmd_a2ensite $safeDomainConf && $cmd_apache_reload");
             $pdo->prepare("UPDATE sys_sites SET status = 'active' WHERE domain = ?")->execute([$domain]);
             $msg = "Site $domain created.";
             $success = true;
@@ -303,13 +304,15 @@ foreach ($tasks as $task) {
                 break;
             }
 
+            $safeDomainConf = escapeshellarg("$domain.conf");
+            $safeDomainSSLConf = escapeshellarg("$domain-le-ssl.conf");
             if ($newStatus === 'active') {
-                shell_exec("$cmd_a2ensite $domain.conf");
-                if (file_exists("/etc/apache2/sites-available/$domain-le-ssl.conf")) shell_exec("$cmd_a2ensite $domain-le-ssl.conf");
+                shell_exec("$cmd_a2ensite $safeDomainConf");
+                if (file_exists("/etc/apache2/sites-available/$domain-le-ssl.conf")) shell_exec("$cmd_a2ensite $safeDomainSSLConf");
                 $msg = "Site $domain enabled.";
             } else {
-                shell_exec("$cmd_a2dissite $domain.conf");
-                shell_exec("$cmd_a2dissite $domain-le-ssl.conf 2>/dev/null");
+                shell_exec("$cmd_a2dissite $safeDomainConf");
+                shell_exec("$cmd_a2dissite $safeDomainSSLConf 2>/dev/null");
                 $msg = "Site $domain disabled.";
             }
             shell_exec($cmd_apache_reload);
@@ -326,11 +329,14 @@ foreach ($tasks as $task) {
                 break;
             }
 
-            shell_exec("$cmd_a2dissite $domain.conf 2>/dev/null");
-            shell_exec("$cmd_a2dissite $domain-le-ssl.conf 2>/dev/null");
+            $safeDomainConf = escapeshellarg("$domain.conf");
+            $safeDomainSSLConf = escapeshellarg("$domain-le-ssl.conf");
+            $safeDomainName = escapeshellarg($domain);
+            shell_exec("$cmd_a2dissite $safeDomainConf 2>/dev/null");
+            shell_exec("$cmd_a2dissite $safeDomainSSLConf 2>/dev/null");
             
             // 1. Revocar y eliminar certificados
-            shell_exec("$cmd_certbot delete --cert-name $domain --non-interactive 2>/dev/null");
+            shell_exec("$cmd_certbot delete --cert-name $safeDomainName --non-interactive 2>/dev/null");
             
             // 2. Limpiar archivos de config
             @unlink("/etc/apache2/sites-available/$domain.conf");
@@ -356,8 +362,10 @@ foreach ($tasks as $task) {
             $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
             
             foreach ($associatedDbs as $db) {
-                shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `{$db['db_name']}`;"));
-                shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '{$db['db_user']}'@'127.0.0.1';"));
+                $safeDbNameDel = str_replace('`', '``', $db['db_name']);
+                $safeDbUserDel = str_replace("'", "''", $db['db_user']);
+                shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `$safeDbNameDel`;"));
+                shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$safeDbUserDel'@'127.0.0.1';"));
             }
             $pdo->prepare("DELETE FROM sys_databases WHERE site_id = ?")->execute([$siteId]);
 
@@ -374,11 +382,15 @@ foreach ($tasks as $task) {
             $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
             $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
             
+            $safeDbName = str_replace('`', '``', $dbName);
+            $safeDbUser = str_replace("'", "''", $dbUser);
+            $safeDbPass = str_replace("'", "''", $dbPass);
+            
             // 1. Crear DB
-            shell_exec("mariadb $auth -e " . escapeshellarg("CREATE DATABASE IF NOT EXISTS `$dbName`;"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("CREATE DATABASE IF NOT EXISTS `$safeDbName`;"));
             // 2. Crear Usuario y Permisos (usando Identificado por para compatibilidad)
-            shell_exec("mariadb $auth -e " . escapeshellarg("CREATE USER IF NOT EXISTS '$dbUser'@'127.0.0.1' IDENTIFIED BY '$dbPass';"));
-            shell_exec("mariadb $auth -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `$dbName`.* TO '$dbUser'@'127.0.0.1';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("CREATE USER IF NOT EXISTS '$safeDbUser'@'127.0.0.1' IDENTIFIED BY '$safeDbPass';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `$safeDbName`.* TO '$safeDbUser'@'127.0.0.1';"));
             shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
             
             $pdo->prepare("INSERT INTO sys_databases (site_id, db_name, db_user, db_pass) VALUES (?, ?, ?, ?)")
@@ -395,8 +407,11 @@ foreach ($tasks as $task) {
             $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
             $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
             
-            shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `$dbName`;"));
-            shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$dbUser'@'127.0.0.1';"));
+            $safeDbName = str_replace('`', '``', $dbName);
+            $safeDbUser = str_replace("'", "''", $dbUser);
+            
+            shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `$safeDbName`;"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$safeDbUser'@'127.0.0.1';"));
             shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
             
             $pdo->prepare("DELETE FROM sys_databases WHERE db_name = ?")->execute([$dbName]);
@@ -412,7 +427,10 @@ foreach ($tasks as $task) {
             $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
             $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
             
-            shell_exec("mariadb $auth -e " . escapeshellarg("ALTER USER '$dbUser'@'127.0.0.1' IDENTIFIED BY '$newPass';"));
+            $safeDbUser = str_replace("'", "''", $dbUser);
+            $safeNewPass = str_replace("'", "''", $newPass);
+            
+            shell_exec("mariadb $auth -e " . escapeshellarg("ALTER USER '$safeDbUser'@'127.0.0.1' IDENTIFIED BY '$safeNewPass';"));
             shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
             
             $pdo->prepare("UPDATE sys_databases SET db_pass = ? WHERE db_user = ? AND db_name = ?")->execute([$newPass, $dbUser, $dbName]);

@@ -9,8 +9,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $msg_type = 'error';
     // 1. Crear nuevo sitio
     if (isset($_POST['domain'])) {
-        $domain = filter_var($_POST['domain'], FILTER_SANITIZE_URL);
+        $domain = strtolower(trim($_POST['domain']));
         $php = isset($_POST['php']) ? 1 : 0;
+        
+        if (!preg_match('/^[a-z0-9.-]+$/', $domain) || empty($domain) || strlen($domain) > 255) {
+            $_SESSION['flash_msg'] = "Error: El nombre de dominio contiene caracteres no válidos.";
+            $_SESSION['flash_type'] = "error";
+            header("Location: " . $_SERVER['PHP_SELF'] . '?new=1');
+            exit;
+        }
         
         if ($domain) {
             try {
