@@ -614,6 +614,7 @@ rm -rf /var/lib/apt/lists/*
 # Reinicio de servicios
 systemctl enable cron
 systemctl restart cron
+a2dissite 000-default.conf || true
 systemctl restart apache2
 
 # Reinicio inteligente de PHP-FPM

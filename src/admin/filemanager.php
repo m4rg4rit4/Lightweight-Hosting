@@ -547,8 +547,104 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         dragZone.addEventListener('drop', (e) => {
             let dt = e.dataTransfer;
-            let files = dt.files;
-            handleFiles(files);
+            
+            // Si soporta webkitGetAsEntry, lo usamos para recursividad
+            if (dt.items && dt.items.length > 0 && dt.items[0].webkitGetAsEntry) {
+                dragZone.innerHTML = "Procesando subida...";
+                let uploadQueue = [];
+                let activeUploads = 0;
+                let pendingEntries = 0;
+
+                function processEntry(entry, path) {
+                    if (entry.isFile) {
+                        pendingEntries++;
+                        entry.file(file => {
+                            uploadQueue.push({ action: 'upload', file: file, currentDir: path });
+                            pendingEntries--;
+                            checkStartUploads();
+                        });
+                    } else if (entry.isDirectory) {
+                        pendingEntries++;
+                        uploadQueue.push({ action: 'create_dir', dirName: entry.name, currentDir: path });
+                        let dirReader = entry.createReader();
+                        let newPath = path ? path + '/' + entry.name : entry.name;
+                        
+                        function readEntries() {
+                            dirReader.readEntries(entries => {
+                                if (entries.length > 0) {
+                                    entries.forEach(e => processEntry(e, newPath));
+                                    readEntries(); // Seguir leyendo (API puede devolver en bloques)
+                                } else {
+                                    pendingEntries--;
+                                    checkStartUploads();
+                                }
+                            });
+                        }
+                        readEntries();
+                    }
+                }
+
+                function checkStartUploads() {
+                    // Start actual HTTP calls only when file structure has been completely parsed
+                    if (pendingEntries === 0) {
+                        processQueueRecursively();
+                    }
+                }
+
+                async function processQueueRecursively() {
+                    dragZone.innerHTML = "Subiendo archivos y carpetas...";
+                    // Sort queue: process creates (dirs) first, then files
+                    uploadQueue.sort((a, b) => {
+                        if (a.action === 'create_dir' && b.action !== 'create_dir') return -1;
+                        if (a.action !== 'create_dir' && b.action === 'create_dir') return 1;
+                        return 0; // maintain relative order otherwise
+                    });
+
+                    for (let i = 0; i < uploadQueue.length; i++) {
+                        let item = uploadQueue[i];
+                        let formData = new FormData();
+                        formData.append('site_id', siteId);
+                        
+                        // Determinar ruta destino final incluyendo la ruta local del navegador
+                        let targetPath = currentPath;
+                        if (targetPath && item.currentDir) targetPath += '/' + item.currentDir;
+                        else if (!targetPath && item.currentDir) targetPath = item.currentDir;
+                        
+                        if (item.action === 'create_dir') {
+                            formData.append('action', 'create');
+                            formData.append('type', 'dir');
+                            formData.append('name', item.dirName);
+                            formData.append('path', targetPath);
+                        } else {
+                            formData.append('action', 'upload');
+                            formData.append('file', item.file);
+                            formData.append('path', targetPath);
+                        }
+                        
+                        try {
+                            await fetch('filemanager.php', { method: 'POST', body: formData });
+                        } catch (err) {
+                            console.error("Error interaccionando", item, err);
+                        }
+                    }
+                    
+                    dragZone.innerHTML = "Arrastra archivos y carpetas aquí para subirlos";
+                    document.getElementById('fileInput').value = '';
+                    loadFiles(currentPath);
+                }
+
+                // Iniciar el procesado
+                for (let i = 0; i < dt.items.length; i++) {
+                    let entry = dt.items[i].webkitGetAsEntry();
+                    if (entry) {
+                        processEntry(entry, '');
+                    }
+                }
+                
+            } else {
+                // Fallback clásico
+                handleFiles(dt.files);
+            }
         }, false);
         
         function handleFileUpload(e) {
@@ -574,7 +670,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             
-            dragZone.innerHTML = "Arrastra archivos aquí para subirlos a la carpeta actual";
+            dragZone.innerHTML = "Arrastra archivos y carpetas aquí para subirlos a la carpeta actual";
             document.getElementById('fileInput').value = '';
             loadFiles(currentPath);
         }

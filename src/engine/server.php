@@ -55,6 +55,7 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     $vhost .= "    ServerName $domain\n";
     $vhost .= "    ServerAlias www.$domain pma.$domain phpmyadmin.$domain\n";
     $vhost .= "    DocumentRoot $document_root\n";
+    $vhost .= "    DirectoryIndex index.php index.html\n";
     $vhost .= "    ErrorLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_error.log\n";
     $vhost .= "    CustomLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_access.log combined\n\n";
     
@@ -209,8 +210,20 @@ foreach ($tasks as $task) {
             $dnsPmaFullOk = checkExternalDNS("phpmyadmin." . $domain, $publicIP);
 
             if (!$dnsOk) {
-                // Volver a poner en pending para el siguiente minuto
-                $pdo->prepare("UPDATE sys_tasks SET status = 'pending', result_msg = 'Waiting for DNS: $domain -> $publicIP' WHERE id = ?")->execute([$taskId]);
+                // Controlar los intentos para evitar un bucle infinito
+                $attempts = isset($payload['attempts']) ? (int)$payload['attempts'] : 0;
+                $attempts++;
+                
+                if ($attempts >= 24) {
+                    $pdo->prepare("UPDATE sys_tasks SET status = 'error', result_msg = 'DNS validation failed after 24 attempts. SSL aborted.' WHERE id = ?")->execute([$taskId]);
+                    $pdo->prepare("UPDATE sys_sites SET status = 'active' WHERE domain = ?")->execute([$domain]); // Recuperar sitio si estaba pendiente de SSL
+                    continue 2;
+                }
+                
+                // Actualizar intentos en payload y volver a poner en pending
+                $payload['attempts'] = $attempts;
+                $newPayload = json_encode($payload);
+                $pdo->prepare("UPDATE sys_tasks SET status = 'pending', payload = ?, result_msg = 'Waiting for DNS (Attempt $attempts/24): $domain -> $publicIP' WHERE id = ?")->execute([$newPayload, $taskId]);
                 continue 2; // Saltar al siguiente item del foreach
             }
 
