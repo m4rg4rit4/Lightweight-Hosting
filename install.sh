@@ -476,10 +476,17 @@ else
 fi
 
 # Crear VirtualHost para el puerto 8080 (Admin + PHPMyAdmin)
-# Detectar el socket real de PHP para evitar fallos de versión
+# Detección robusta del socket de PHP
+# En Debian 13, php-fpm-socket-helper suele crear /run/php/php-fpm.sock
 REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
 if [ -z "$REAL_PHP_SOCKET" ]; then
-    REAL_PHP_SOCKET="/run/php/php${PHP_VERSION}-fpm.sock"
+    # Fallback 1: El socket genérico de Debian 13
+    if [ -S "/run/php/php-fpm.sock" ]; then
+        REAL_PHP_SOCKET="/run/php/php-fpm.sock"
+    else
+        # Fallback 2: El socket basado en la versión
+        REAL_PHP_SOCKET="/run/php/php${PHP_VERSION}-fpm.sock"
+    fi
 fi
 
 cat <<EOF > /etc/apache2/sites-available/000-admin.conf

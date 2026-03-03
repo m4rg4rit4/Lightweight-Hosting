@@ -17,14 +17,24 @@ $php_socket = "/run/php/php$php_v-fpm.sock";
 
 // Fallback: buscar cualquier socket activo si el detectado no existe
 if (!file_exists($php_socket)) {
-    $found_sockets = glob("/run/php/php*-fpm.sock");
-    if (!empty($found_sockets)) {
-        $php_socket = $found_sockets[0];
-        // Extraer versión del socket si es posible
-        if (preg_match('/php([\d\.]+)-fpm/', $php_socket, $matches)) {
-            $php_v = $matches[1];
+    // Probar el socket genérico de Debian 13 primero
+    if (file_exists('/run/php/php-fpm.sock')) {
+        $php_socket = '/run/php/php-fpm.sock';
+    } else {
+        $found_sockets = glob("/run/php/php*-fpm.sock");
+        if (!empty($found_sockets)) {
+            $php_socket = $found_sockets[0];
+            // Extraer versión del socket si es posible
+            if (preg_match('/php([\d\.]+)-fpm/', $php_socket, $matches)) {
+                $php_v = $matches[1];
+            }
         }
     }
+}
+
+// Garantizar que NUNCA esté vacío para evitar "400 Bad Request"
+if (empty($php_socket)) {
+    $php_socket = "/run/php/php8.4-fpm.sock"; // Fallback final razonable para Debian 13
 }
 
 require '/var/www/admin_panel/config.php';
