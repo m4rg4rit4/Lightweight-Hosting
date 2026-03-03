@@ -2,6 +2,14 @@
 require 'config.php';
 $pdo = getPDO();
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'cancel_task') {
+    $taskId = (int)$_POST['task_id'];
+    $stmt = $pdo->prepare("UPDATE sys_tasks SET status = 'error', result_msg = 'Cancelled by user via Panel' WHERE id = ? AND status = 'pending'");
+    $stmt->execute([$taskId]);
+    header("Location: tasks.php?msg=Task+Cancelled");
+    exit;
+}
+
 // Paginación o límite simple
 $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 25")->fetchAll();
 ?>
@@ -98,6 +106,7 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 25"
                     <th>Payload</th>
                     <th>Resultado / Error</th>
                     <th>Fecha</th>
+                    <th>Acciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -111,6 +120,15 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 25"
                         <?php echo htmlspecialchars($t['result_msg']); ?>
                     </td>
                     <td style="color: var(--text-dim); font-size: 0.8rem;"><?php echo $t['created_at']; ?></td>
+                    <td>
+                        <?php if ($t['status'] === 'pending'): ?>
+                        <form method="POST" style="display:inline;" onsubmit="return confirm('¿Seguro que deseas cancelar esta tarea?');">
+                            <input type="hidden" name="action" value="cancel_task">
+                            <input type="hidden" name="task_id" value="<?php echo $t['id']; ?>">
+                            <button type="submit" style="background:transparent; border:1px solid rgba(239, 68, 68, 0.3); color:var(--error); border-radius:4px; padding:4px 8px; cursor:pointer; font-size:0.75rem;">Cancelar</button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($tasks)): ?>

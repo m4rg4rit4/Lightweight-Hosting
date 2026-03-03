@@ -50,6 +50,7 @@ function checkExternalDNS($domain, $expectedIP) {
 }
 
 function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = false) {
+    global $php_socket;
     $port = $is_ssl ? 443 : 80;
     $vhost = "<VirtualHost *:$port>\n";
     $vhost .= "    ServerName $domain\n";
@@ -78,13 +79,13 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     $vhost .= "        AllowOverride All\n";
     $vhost .= "        Require all granted\n";
     $vhost .= "        <FilesMatch \.php$>\n";
-    $vhost .= "            SetHandler \"proxy:unix:$php_socket|fcgi://localhost\"\n";
+    $vhost .= "            SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
     $vhost .= "        </FilesMatch>\n";
     $vhost .= "    </Directory>\n\n";
     
     if ($php_enabled) {
         $vhost .= "    <FilesMatch \.php$>\n";
-        $vhost .= "        SetHandler \"proxy:unix:$php_socket|fcgi://localhost\"\n";
+        $vhost .= "        SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
         $vhost .= "    </FilesMatch>\n";
     }
 

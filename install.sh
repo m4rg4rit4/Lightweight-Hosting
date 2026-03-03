@@ -477,7 +477,10 @@ fi
 
 # Crear VirtualHost para el puerto 8080 (Admin + PHPMyAdmin)
 # Detectar el socket real de PHP para evitar fallos de versión
-REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock | head -n 1)
+REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
+if [ -z "$REAL_PHP_SOCKET" ]; then
+    REAL_PHP_SOCKET="/run/php/php${PHP_VERSION}-fpm.sock"
+fi
 
 cat <<EOF > /etc/apache2/sites-available/000-admin.conf
 <VirtualHost *:8080>
@@ -495,7 +498,7 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
         AllowOverride All
         Require all granted
         <FilesMatch \.php$>
-            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
         </FilesMatch>
     </Directory>
 
@@ -527,7 +530,7 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
         AllowOverride All
         Require all granted
         <FilesMatch \.php$>
-            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
+            SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
         </FilesMatch>
     </Directory>
 
@@ -557,7 +560,7 @@ Alias /dbadmin $ADMIN_PATH/dbadmin
     AllowOverride All
     Require all granted
     <FilesMatch \.php$>
-        SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
+        SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
     </FilesMatch>
 </Directory>
 
@@ -567,7 +570,7 @@ Alias /dbadmin $ADMIN_PATH/dbadmin
     AllowOverride All
     Require all granted
     <FilesMatch \.php$>
-        SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost"
+        SetHandler "proxy:unix:$REAL_PHP_SOCKET|fcgi://localhost/"
     </FilesMatch>
 </Directory>
 EOF
