@@ -9,6 +9,7 @@ Un sistema de hosting ultra-ligero diseñado para hardware extremadamente limita
 - **Arquitectura Segura**: El panel web solo escribe en base de datos. Un motor de tareas ejecutado por root procesa los cambios vía Cron.
 - **Aislamiento**: Cada sitio puede tener su propia configuración (PHP, SSL via Let's Encrypt).
 - **Gestión de Estados**: Posibilidad de activar/desactivar sitios completos y soporte individual para PHP.
+- **Soporte DNS**: Integración con [Lightweight-Hosting-DNS](https://github.com/m4rg4rit4/Lightweight-Hosting-DNS) para gestión centralizada de registros.
 - **Doble Panel Admin**: Acceso vía puerto 8080 (HTTP) y 8090 (HTTPS) securizado automáticamente.
 
 ## 📋 Requisitos de Hardware
@@ -37,5 +38,8 @@ sudo ./install.sh
 - `src/engine`: Motor de procesamiento de tareas (Background worker).
 - `install.sh`: Script principal de instalación y optimización del SO.
 - `installadmin.sh`: Script para despliegue y actualizaciones de la interfaz.
+
+## 🤝 Repositorios Relacionados
+- [Lightweight-Hosting-DNS](https://github.com/m4rg4rit4/Lightweight-Hosting-DNS) - Sistema de gestión de DNS para este panel.
 
 
