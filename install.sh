@@ -44,6 +44,14 @@ if [ -z "$ADMIN_EMAIL" ]; then
 fi
 
 SHORT_HOSTNAME=$(echo $FULL_FQDN | cut -d. -f1)
+DNS_HOSTNAME=$SHORT_HOSTNAME
+DNS_DOMAIN=$(echo $FULL_FQDN | cut -s -d. -f2-)
+if [ -z "$DNS_DOMAIN" ]; then
+    DNS_DOMAIN=$FULL_FQDN
+fi
+DNS_ADMIN_EMAIL="admin@$DNS_DOMAIN"
+LETSENCRYPT_EMAIL="$ADMIN_EMAIL"
+
 
 printf "${YELLOW}Configurando hostname a: ${NC}${GREEN}$FULL_FQDN${NC}\n"
 hostnamectl set-hostname "$FULL_FQDN"
@@ -427,6 +435,10 @@ define('DB_NAME', 'dbadmin');
 define('DB_USER', 'dbadmin');
 define('DB_PASS', '$DB_ADMIN_PASS');
 define('ADMIN_EMAIL', '$ADMIN_EMAIL');
+define('DNS_HOSTNAME', '$DNS_HOSTNAME');
+define('DNS_DOMAIN', '$DNS_DOMAIN');
+define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
+define('LETSENCRYPT_EMAIL', '$ADMIN_EMAIL');
 define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
 
 function getPDO() {
