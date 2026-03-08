@@ -1,0 +1,19 @@
+# Archivos de configuración local y sensible
+config.php
+.env
+auth_key.txt
+
+# Logs y archivos temporales
+*.log
+tmp/
+cache/
+
+# Carpetas de IDE y sistema
+.vscode/
+.idea/
+.DS_Store
+.agent/
+Thumbs.db
+
+# Dependencias de PHP (si se usara composer en el futuro)
+vendor/
