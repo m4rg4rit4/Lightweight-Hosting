@@ -10,6 +10,9 @@ Un sistema de hosting ultra-ligero diseñado para hardware extremadamente limita
 - **Aislamiento**: Cada sitio puede tener su propia configuración (PHP, SSL via Let's Encrypt).
 - **Gestión de Estados**: Posibilidad de activar/desactivar sitios completos y soporte individual para PHP.
 - **Soporte DNS**: Integración con [Lightweight-Hosting-DNS](https://github.com/m4rg4rit4/Lightweight-Hosting-DNS) para gestión centralizada de registros.
+- **Backups Automáticos & Sync**: Programación de respaldos diarios/semanales con sincronización automática a **MEGA**.
+- **Auto-Recuperación**: Capacidad para recrear sitios e infraestructura automáticamente a partir de backups en la nube.
+- **Seguridad Endurecida**: Protección nativa contra Path Traversal, inyecciones de código y validación estricta de duplicados.
 - **Doble Panel Admin**: Acceso vía puerto 8080 (HTTP) y 8090 (HTTPS) securizado automáticamente.
 
 ## 📋 Requisitos de Hardware
