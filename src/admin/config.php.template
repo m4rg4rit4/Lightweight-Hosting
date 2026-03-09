@@ -8,7 +8,7 @@ define('DNS_HOSTNAME', '{{DNS_HOSTNAME}}');
 define('DNS_DOMAIN', '{{DNS_DOMAIN}}');
 define('DNS_ADMIN_EMAIL', '{{DNS_ADMIN_EMAIL}}');
 define('LETSENCRYPT_EMAIL', '{{LETSENCRYPT_EMAIL}}');
-
+define('HOSTING_INSTALLED', 'true');
 
 function getPDO() {
     static $pdo;

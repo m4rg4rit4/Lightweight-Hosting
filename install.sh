@@ -440,6 +440,7 @@ define('DNS_DOMAIN', '$DNS_DOMAIN');
 define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
 define('LETSENCRYPT_EMAIL', '$ADMIN_EMAIL');
 define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
+define('HOSTING_INSTALLED', 'true');
 
 function getPDO() {
     static \$pdo;
