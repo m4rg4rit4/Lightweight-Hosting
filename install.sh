@@ -448,8 +448,9 @@ define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
 define('LETSENCRYPT_EMAIL', '$ADMIN_EMAIL');
 define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
 define('HOSTING_INSTALLED', 'true');
+EOF
 
-// DNS Alternativo (Si están definidos)
+# DNS Alternativo (Si están definidos)
 if [ ! -z "$EXISTING_DNS_TOKEN" ]; then
     echo "define('DNS_TOKEN', '$EXISTING_DNS_TOKEN');" >> $ADMIN_PATH/config.php
 else
