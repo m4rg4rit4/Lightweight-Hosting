@@ -169,12 +169,7 @@ $processing_count = $is_processing->fetchColumn();
 </head>
 <body>
     <div class="container">
-        <nav>
-            <strong>Lightweight Hosting</strong>
-            <a href="index.php">← Volver a Sitios</a>
-            <span style="color: var(--text-dim);">/</span>
-            <span style="font-weight: 600;"><?php echo htmlspecialchars($site['domain']); ?></span>
-        </nav>
+        <?php include 'header.php'; ?>
 
         <?php if ($msg): ?>
             <div class='alert alert-<?php echo $msg_type; ?>'>

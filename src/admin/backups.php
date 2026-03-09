@@ -218,12 +218,7 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
 </head>
 <body>
     <div class="container">
-        <nav>
-            <strong>Lightweight Hosting</strong>
-            <a href="index.php">Sitios</a>
-            <a href="backups.php" class="active">Backups (MEGA)</a>
-            <a href="<?php echo defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'dbadmin'; ?>/" target="_blank">Base de Datos</a>
-        </nav>
+        <?php include 'header.php'; ?>
 
         <?php if ($msg): ?>
             <div class='alert alert-<?php echo $msg_type; ?>'>

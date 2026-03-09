@@ -52,6 +52,73 @@ function getPublicIP() {
     return trim($ip);
 }
 
+function syncDnsRecord($action, $domain) {
+    if (!defined('DNS_TOKEN') || !defined('DNS_SERVER')) return;
+    $servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
+    if (empty($servers) || empty(DNS_TOKEN)) return;
+
+    $publicIP = getPublicIP();
+    if (empty($publicIP)) return;
+
+    foreach ($servers as $server) {
+        $baseUrl = (strpos($server, 'http') === 0) ? rtrim($server, '/') : "http://" . rtrim($server, '/');
+        
+        $ch = curl_init("$baseUrl/api-dns/records?domain=" . urlencode($domain));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        $res = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode === 200 && $res) {
+            $data = json_decode($res, true);
+            if (!empty($data['success'])) {
+                $records = $data['data']['records'] ?? [];
+
+                if ($action === 'add') {
+                    $exists = false;
+                    foreach ($records as $r) {
+                        if ($r['name'] === '@' && $r['type'] === 'A' && $r['content'] === $publicIP) {
+                            $exists = true;
+                            break;
+                        }
+                    }
+                    if (!$exists) {
+                        $payload = json_encode([
+                            'domain' => $domain,
+                            'name' => '@',
+                            'type' => 'A',
+                            'content' => $publicIP
+                        ]);
+                        $ch2 = curl_init("$baseUrl/api-dns/record/add");
+                        curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+                        curl_setopt($ch2, CURLOPT_POST, true);
+                        curl_setopt($ch2, CURLOPT_POSTFIELDS, $payload);
+                        curl_setopt($ch2, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
+                        curl_exec($ch2);
+                        curl_close($ch2);
+                    }
+                } elseif ($action === 'del') {
+                    foreach ($records as $r) {
+                        if ($r['name'] === '@' && $r['type'] === 'A' && $r['content'] === $publicIP) {
+                            $payload = json_encode(['id' => $r['id']]);
+                            $ch2 = curl_init("$baseUrl/api-dns/record/del");
+                            curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+                            curl_setopt($ch2, CURLOPT_POST, true);
+                            curl_setopt($ch2, CURLOPT_POSTFIELDS, $payload);
+                            curl_setopt($ch2, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
+                            curl_exec($ch2);
+                            curl_close($ch2);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
 function checkExternalDNS($domain, $expectedIP) {
     // Usar dig con el resolver de Google para evitar caché local/hosts
     $output = shell_exec("/usr/bin/dig @8.8.8.8 " . escapeshellarg($domain) . " +short");
@@ -198,16 +265,21 @@ foreach ($tasks as $task) {
             $msg = "Site $domain created.";
             $success = true;
 
-            // --- Auto-encolar SSL si la IP ya apunta aquí ---
+            // --- Sincronizar DNS ---
+            syncDnsRecord('add', $domain);
+
+            // --- Auto-encolar SSL ---
             $publicIP = getPublicIP();
-            if ($publicIP && checkExternalDNS($domain, $publicIP)) {
+            $dnsManaged = defined('DNS_TOKEN') && defined('DNS_SERVER') && !empty(DNS_TOKEN) && !empty(DNS_SERVER);
+            
+            if ($dnsManaged || ($publicIP && checkExternalDNS($domain, $publicIP))) {
                 // Verificar si ya hay una tarea SSL pendiente para este dominio para no duplicar
                 $stmtSSL = $pdo->prepare("SELECT id FROM sys_tasks WHERE task_type = 'SSL_LETSENCRYPT' AND payload LIKE ? AND status = 'pending'");
                 $stmtSSL->execute(['%"domain": "' . $domain . '"%']);
                 if (!$stmtSSL->fetch()) {
                     $sslPayload = json_encode(['domain' => $domain]);
                     $pdo->prepare("INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SSL_LETSENCRYPT', ?, 'pending')")->execute([$sslPayload]);
-                    $msg .= " SSL task enqueued automatically (DNS OK).";
+                    $msg .= " SSL task enqueued " . ($dnsManaged ? "(DNS API configured)" : "(DNS OK)");
                 }
             }
             break;
@@ -376,6 +448,9 @@ foreach ($tasks as $task) {
             }
             
             $pdo->prepare("DELETE FROM sys_sites WHERE domain = ?")->execute([$domain]);
+            
+            // --- Limpiar DNS ---
+            syncDnsRecord('del', $domain);
             
             // 4. Limpiar bases de datos asociadas
             $dbs = $pdo->prepare("SELECT db_name, db_user FROM sys_databases WHERE site_id = ?");

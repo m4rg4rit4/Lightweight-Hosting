@@ -426,11 +426,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
     <div class="container">
-        <nav>
-            <strong>Lightweight Hosting</strong>
-            <a href="index.php">&larr; Volver a Sitios</a>
-            <span>/ Administrador de Archivos</span>
-        </nav>
+        <?php include 'header.php'; ?>
         
         <div class="header">
             <h1><span style="color: var(--text-dim); font-weight: 300;">Archivos de:</span> <?php echo htmlspecialchars($site['domain']); ?></h1>
