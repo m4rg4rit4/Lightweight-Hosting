@@ -53,10 +53,12 @@ Esta es la ruta de desarrollo para integrar las opciones descritas siguiendo la 
   - [x] Handler en `server.php` para la creación de pools PHP-FPM (`ondemand`).
   - [x] Handler para generar `<VirtualHost>` en Apache2, habilitando Proxy a ese pool FPM y recargando Apache (graceful).
 
-- [ ] **Fase 4: Módulo de Bases de Datos**
-  - [ ] Ajustar la configuración `my.cnf` inicial para entornos de 1GB RAM (deshabilitar `performance_schema`).
-  - [ ] Handler en `server.php` para invocar sentencias SQL (`CREATE DATABASE`, `GRANT PRIVILEGES`) de forma segura.
+- [x] **Fase 4: Módulo de Bases de Datos**
+  - [x] Ajustar la configuración `my.cnf` inicial para entornos de 1GB RAM (deshabilitar `performance_schema`).
+  - [x] Handler en `server.php` para invocar sentencias SQL (`CREATE DATABASE`, `GRANT PRIVILEGES`) de forma segura.
+  - [x] Interfaz de administración de bases de datos vinculada a sitios.
 
 - [x] **Fase 5: Módulo de SSL y Dominios**
   - [x] Inclusión de peticiones estáticas `.well-known/acme-challenge` para certbot.
   - [x] Handler para disparar la ejecución de Certbot vía task y actualizar el VirtualHost con las rutas a los certificados Let's Encrypt.
+  - [x] Rediseño de Gestión DNS jerárquica y agrupación de sitios (Plesk Style).

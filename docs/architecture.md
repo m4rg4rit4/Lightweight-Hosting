@@ -30,6 +30,11 @@ El objetivo es crear un panel de control y sistema de instalación **extremedame
 - **Base de Datos Dedicada**: Base de datos `dbadmin` con las siguientes tablas:
   - `sys_sites`: Registro maestro de los dominios instalados.
   - `sys_tasks`: Cola de tareas para el motor de procesamiento.
+  - `sys_databases`, `sys_backups`, `sys_settings`: Gestión integral de recursos y configuración.
+- **Gestión DNS Jerárquica (Plesk Style)**: 
+  - Agrupación automática de subdominios y sitios bajo dominios raíz.
+  - Panel unificado de zona para visualizar registros DNS y servicios vinculados (Web, BBDD, Archivos) en un solo lugar.
+  - Exportación de zonas en formato BIND9 integrada.
 - **Acceso a Datos**: Archivo `/var/www/admin_panel/config.php` que incluye una función centralizada `getPDO()`.
 - **Gestor DB**: **Adminer** integrado para mantenimiento directo de tablas.
 

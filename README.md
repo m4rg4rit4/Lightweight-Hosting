@@ -6,10 +6,19 @@ Un sistema de hosting ultra-ligero diseñado para hardware extremadamente limita
 - **Apache2 MPM Event**: Optimizado para bajo consumo de memoria.
 - **PHP-FPM OnDemand**: Los procesos de PHP solo se activan cuando hay tráfico.
 - **MariaDB Low Memory Profile**: Desactivación de Performance Schema y optimización de buffers.
-- **Arquitectura Segura**: El panel web solo escribe en base de datos. Un motor de tareas ejecutado por root procesa los cambios vía Cron.
+- **Base de Datos Dedicada**: Base de datos `dbadmin` con las siguientes tablas:
+  - `sys_sites`: Registro maestro de los dominios instalados.
+  - `sys_tasks`: Cola de tareas para el motor de procesamiento.
+  - `sys_databases`, `sys_backups`, `sys_settings`: Gestión de recursos y configuración global.
+- **Gestión DNS Jerárquica (Plesk Style)**: 
+  - Agrupación automática de subdominios y sitios bajo dominios raíz.
+  - Panel unificado de zona para visualizar registros DNS y servicios vinculados (Web, BBDD, Archivos) en un solo lugar.
+  - Exportación de zonas en formato BIND9 integrada.
+- **Acceso a Datos**: Archivo `/var/www/admin_panel/config.php` que incluye una función centralizada `getPDO()`.
 - **Aislamiento**: Cada sitio puede tener su propia configuración (PHP, SSL via Let's Encrypt).
 - **Gestión de Estados**: Posibilidad de activar/desactivar sitios completos y soporte individual para PHP.
-- **Soporte DNS**: Integración con [Lightweight-Hosting-DNS](https://github.com/m4rg4rit4/Lightweight-Hosting-DNS) para gestión centralizada de registros.
+- **Soporte DNS Jerárquico**: Integración con [Lightweight-Hosting-DNS](https://github.com/m4rg4rit4/Lightweight-Hosting-DNS) con una interfaz profesional que agrupa subdominios bajo sus dominios raíz (estilo Plesk/ISPConfig).
+- **Gestión Centralizada**: Panel único para administrar registros DNS, sitios web, bases de datos y archivos vinculados a un mismo dominio.
 - **Backups Automáticos & Sync**: Programación de respaldos diarios/semanales con sincronización automática a **MEGA**.
 - **Auto-Recuperación**: Capacidad para recrear sitios e infraestructura automáticamente a partir de backups en la nube.
 - **Seguridad Endurecida**: Protección nativa contra Path Traversal, inyecciones de código y validación estricta de duplicados.
