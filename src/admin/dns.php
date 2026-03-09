@@ -135,9 +135,26 @@ try {
     $localSites = $stmt->fetchAll(PDO::FETCH_COLUMN);
 } catch (Exception $e) {}
 
+// Obtener todas las zonas gestionadas por la API DNS
+$apiZones = [];
+$resZones = dnsApiRequest('/api-dns/zones', 'GET');
+if ($resZones['code'] === 200) {
+    $dataZones = json_decode($resZones['response'], true);
+    // Asumimos que la API devuelve una lista de dominios o un objeto con ellos
+    $apiZones = $dataZones['zones'] ?? $dataZones['data'] ?? [];
+    // Si es un array de objetos, extraer el nombre del dominio
+    if (!empty($apiZones) && isset($apiZones[0]['domain'])) {
+        $apiZones = array_column($apiZones, 'domain');
+    }
+}
+
+// Combinar y eliminar duplicados
+$allDomains = array_unique(array_merge($localSites, $apiZones));
+sort($allDomains);
+
 // Si hay un dominio activo, traer sus registros de la API
 if ($activeDomain) {
-    $res = dnsApiRequest('/api-dns/records?domain=' . urlencode($activeDomain), 'GET');
+    $res = dnsApiRequest('/api-dns/records/' . urlencode($activeDomain), 'GET');
     if ($res['code'] === 200) {
         $data = json_decode($res['response'], true);
         if ($data['success']) {
@@ -149,6 +166,17 @@ if ($activeDomain) {
         $apiError = "El dominio no existe en el servidor DNS o no hay registros.";
     } else {
         $apiError = "No se pudo conectar al servidor DNS (Code: {$res['code']})";
+    }
+}
+
+// Manejo de exportación (BIND9)
+$exportContent = '';
+if ($activeDomain && isset($_GET['export'])) {
+    $resExport = dnsApiRequest("/api-dns/zone/" . urlencode($activeDomain) . "/export", 'GET');
+    if ($resExport['code'] === 200) {
+        $exportContent = $resExport['response'];
+    } else {
+        $apiError = "No se pudo exportar la zona.";
     }
 }
 ?>
@@ -315,14 +343,12 @@ if ($activeDomain) {
             </form>
 
             <div class="domain-selector">
-                <?php foreach ($localSites as $s): ?>
+                <?php foreach ($allDomains as $s): ?>
                     <a href="?domain=<?php echo urlencode($s); ?>" class="domain-tag <?php echo ($activeDomain === $s) ? 'active' : ''; ?>">
                         <?php echo htmlspecialchars($s); ?>
+                        <?php if (!in_array($s, $localSites)): ?> <small style="opacity: 0.6; font-size: 0.6rem;">(API)</small><?php endif; ?>
                     </a>
                 <?php endforeach; ?>
-                <?php if ($activeDomain && !in_array($activeDomain, $localSites)): ?>
-                    <a href="#" class="domain-tag active"><?php echo htmlspecialchars($activeDomain); ?> (Externa)</a>
-                <?php endif; ?>
             </div>
             
             <?php if (!$activeDomain): ?>
@@ -332,9 +358,21 @@ if ($activeDomain) {
 
         <?php if ($activeDomain): ?>
         
-        <!-- Formulario Nuevo Registro -->
+        <!-- Formulario Nuevo Registro y Exportación -->
         <div class="panel" style="border-left: 3px solid var(--primary);">
-            <h3 style="margin-bottom: 20px;">Añadir registro a <?php echo htmlspecialchars($activeDomain); ?></h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">Gestionar <?php echo htmlspecialchars($activeDomain); ?></h3>
+                <div>
+                    <a href="?domain=<?php echo urlencode($activeDomain); ?>&export=1" class="btn btn-outline" style="text-decoration: none;">Ver Exportación BIND9</a>
+                </div>
+            </div>
+
+            <?php if ($exportContent): ?>
+                <div style="background: #000; color: #0f0; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 0.8rem; overflow-x: auto; margin-bottom: 25px; white-space: pre;">
+                    <?php echo htmlspecialchars($exportContent); ?>
+                </div>
+            <?php endif; ?>
+
             <form method="POST">
                 <input type="hidden" name="action" value="add_record">
                 <input type="hidden" name="domain" value="<?php echo htmlspecialchars($activeDomain); ?>">

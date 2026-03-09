@@ -189,6 +189,9 @@ if [ -f "$EXISTING_CONFIG" ]; then
     EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_DB_MANAGER=$(grep "'DB_MANAGER_DIR'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    # Extraer variables de DNS (pueden estar comentadas o no)
+    EXISTING_DNS_TOKEN=$(grep "DNS_TOKEN" "$EXISTING_CONFIG" | sed -E "s/.*'DNS_TOKEN', '([^']*)'.*/\1/")
+    EXISTING_DNS_SERVER=$(grep "DNS_SERVER" "$EXISTING_CONFIG" | sed -E "s/.*'DNS_SERVER', '([^']*)'.*/\1/")
     
     if [ ! -z "$EXISTING_DB_PASS" ]; then
         DB_ADMIN_PASS="$EXISTING_DB_PASS"
@@ -445,6 +448,21 @@ define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
 define('LETSENCRYPT_EMAIL', '$ADMIN_EMAIL');
 define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
 define('HOSTING_INSTALLED', 'true');
+
+// DNS Alternativo (Si están definidos)
+if [ ! -z "$EXISTING_DNS_TOKEN" ]; then
+    echo "define('DNS_TOKEN', '$EXISTING_DNS_TOKEN');" >> $ADMIN_PATH/config.php
+else
+    echo "// define('DNS_TOKEN', '{{DNS_TOKEN}}');" >> $ADMIN_PATH/config.php
+fi
+
+if [ ! -z "$EXISTING_DNS_SERVER" ]; then
+    echo "define('DNS_SERVER', '$EXISTING_DNS_SERVER');" >> $ADMIN_PATH/config.php
+else
+    echo "// define('DNS_SERVER', '{{DNS_SERVER}}');" >> $ADMIN_PATH/config.php
+fi
+
+cat <<EOF >> $ADMIN_PATH/config.php
 
 function getPDO() {
     static \$pdo;

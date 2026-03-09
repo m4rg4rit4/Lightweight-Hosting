@@ -63,13 +63,30 @@ function syncDnsRecord($action, $domain) {
     foreach ($servers as $server) {
         $baseUrl = (strpos($server, 'http') === 0) ? rtrim($server, '/') : "http://" . rtrim($server, '/');
         
-        $ch = curl_init("$baseUrl/api-dns/records?domain=" . urlencode($domain));
+        $ch = curl_init("$baseUrl/api-dns/records/" . urlencode($domain));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN]);
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
         $res = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        if ($httpCode === 404 && $action === 'add') {
+            // El dominio no existe, hay que añadirlo primero
+            $payload = json_encode([
+                'domain' => $domain,
+                'ip' => $publicIP
+            ]);
+            $chAdd = curl_init("$baseUrl/api-dns/add");
+            curl_setopt($chAdd, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($chAdd, CURLOPT_POST, true);
+            curl_setopt($chAdd, CURLOPT_POSTFIELDS, $payload);
+            curl_setopt($chAdd, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
+            curl_exec($chAdd);
+            curl_close($chAdd);
+            // El endpoint /add ya crea los registros base, terminamos aquí
+            break;
+        }
 
         if ($httpCode === 200 && $res) {
             $data = json_decode($res, true);
