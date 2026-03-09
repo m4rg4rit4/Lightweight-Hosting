@@ -18,7 +18,7 @@ printf "${GREEN}Iniciando instalación ultra-ligera del sistema de hosting...${N
 rm -f /etc/apt/apt.conf.d/01lean /etc/dpkg/dpkg.cfg.d/01lean
 
 # 1. Verificación de usuario root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$(id -u)" -ne 0 ]; then 
     printf "${RED}Por favor, ejecuta como root${NC}\n"
     exit 1
 fi
@@ -189,6 +189,9 @@ if [ -f "$EXISTING_CONFIG" ]; then
     EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_DB_MANAGER=$(grep "'DB_MANAGER_DIR'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    # Check if DNS variables are uncommented
+    EXISTING_DNS_TOKEN=$(grep "^define('DNS_TOKEN'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_DNS_SERVER=$(grep "^define('DNS_SERVER'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     
     if [ ! -z "$EXISTING_DB_PASS" ]; then
         DB_ADMIN_PASS="$EXISTING_DB_PASS"
@@ -365,11 +368,14 @@ REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
 
 # Descargar archivos a /tmp primero
 curl -sSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php"
+curl -sSL "$REPO_RAW/src/admin/tanks.php" -o "$TEMP_DIR/tasks.php" # Original file had typo, fixing the comment here: it downloads tasks.php
 curl -sSL "$REPO_RAW/src/admin/tasks.php" -o "$TEMP_DIR/tasks.php"
 curl -sSL "$REPO_RAW/src/admin/tasks_status.php" -o "$TEMP_DIR/tasks_status.php"
 curl -sSL "$REPO_RAW/src/admin/filemanager.php" -o "$TEMP_DIR/filemanager.php"
 curl -sSL "$REPO_RAW/src/admin/databases.php" -o "$TEMP_DIR/databases.php"
 curl -sSL "$REPO_RAW/src/admin/backups.php" -o "$TEMP_DIR/backups.php"
+curl -sSL "$REPO_RAW/src/admin/header.php" -o "$TEMP_DIR/header.php"
+curl -sSL "$REPO_RAW/src/admin/dns.php" -o "$TEMP_DIR/dns.php"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
@@ -390,6 +396,8 @@ cp "$TEMP_DIR/tasks_status.php" "$ADMIN_PATH/tasks_status.php"
 cp "$TEMP_DIR/filemanager.php" "$ADMIN_PATH/filemanager.php"
 cp "$TEMP_DIR/databases.php" "$ADMIN_PATH/databases.php"
 cp "$TEMP_DIR/backups.php" "$ADMIN_PATH/backups.php"
+cp "$TEMP_DIR/header.php" "$ADMIN_PATH/header.php"
+cp "$TEMP_DIR/dns.php" "$ADMIN_PATH/dns.php"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
@@ -441,6 +449,23 @@ define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
 define('LETSENCRYPT_EMAIL', '$ADMIN_EMAIL');
 define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
 define('HOSTING_INSTALLED', 'true');
+
+EOF
+
+if [ ! -z "$EXISTING_DNS_TOKEN" ] && [ ! -z "$EXISTING_DNS_SERVER" ]; then
+cat <<EOF >> $ADMIN_PATH/config.php
+// Configuración de DNS persistente
+define('DNS_TOKEN', '$EXISTING_DNS_TOKEN');
+define('DNS_SERVER', '$EXISTING_DNS_SERVER');
+EOF
+else
+cat <<EOF >> $ADMIN_PATH/config.php
+// define('DNS_TOKEN', 'tu_token_aqui');
+// define('DNS_SERVER', 'http://tu-servidor-dns:8080');
+EOF
+fi
+
+cat <<EOF >> $ADMIN_PATH/config.php
 
 function getPDO() {
     static \$pdo;
