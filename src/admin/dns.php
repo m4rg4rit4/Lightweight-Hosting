@@ -108,7 +108,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $domain_to_redirect = $newZone;
         } else {
             $errData = @json_decode($res['response'], true);
-            $msg = "Error al crear la zona: " . ($errData['message'] ?? $res['error'] ?? "Cód {$res['code']}");
+            $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
+            if (empty($errData['message']) && !empty($res['response'])) {
+                $detail .= " | " . substr(strip_tags($res['response']), 0, 150);
+            }
+            $msg = "Error al crear la zona: " . $detail;
         }
     } 
     elseif ($action === 'add_record') {
@@ -139,7 +143,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg_type = 'success';
         } else {
             $errData = @json_decode($res['response'], true);
-            $msg = "Fallo borrando registro: " . ($errData['message'] ?? $res['error'] ?? "Cód {$res['code']}");
+            $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
+            if (empty($errData['message']) && !empty($res['response'])) {
+                $detail .= " | " . substr(strip_tags($res['response']), 0, 150);
+            }
+            $msg = "Error al borrar el registro: " . $detail;
         }
     }
     
