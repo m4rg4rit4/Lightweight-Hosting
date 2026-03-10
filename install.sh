@@ -14,11 +14,18 @@ NC='\033[0m' # No Color
 
 printf "${GREEN}Iniciando instalación ultra-ligera del sistema de hosting...${NC}\n"
 
+# Detección de flag /update para instalación no interactiva
+AUTO_UPDATE=false
+if [[ "$*" == *"/update"* ]]; then
+    AUTO_UPDATE=true
+    printf "${YELLOW}Modo NO INTERACTIVO activado (/update)${NC}\n"
+fi
+
 # Obtener versión local
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION="1.1.0"
+    VERSION="1.1.1"
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
@@ -34,8 +41,13 @@ fi
 # 2. Configuración de Hostname y FQDN
 printf "${YELLOW}Configuración del Hostname y Dominio${NC}\n"
 CURRENT_FQDN=$(hostname -f 2>/dev/null || hostname)
-read -p "Introduce el FQDN completo [$CURRENT_FQDN]: " FULL_FQDN
-FULL_FQDN=${FULL_FQDN:-$CURRENT_FQDN}
+if [ "$AUTO_UPDATE" = true ]; then
+    FULL_FQDN=${FULL_FQDN:-$CURRENT_FQDN}
+    printf "${YELLOW}Usando FQDN: ${NC}${GREEN}$FULL_FQDN${NC}\n"
+else
+    read -p "Introduce el FQDN completo [$CURRENT_FQDN]: " FULL_FQDN
+    FULL_FQDN=${FULL_FQDN:-$CURRENT_FQDN}
+fi
 
 if [ -z "$FULL_FQDN" ]; then
     printf "${RED}El FQDN no puede estar vacío. Abortando.${NC}\n"
@@ -43,8 +55,13 @@ if [ -z "$FULL_FQDN" ]; then
 fi
 
 printf "${YELLOW}Configuración del Email del Administrador (para Let's Encrypt)${NC}\n"
-read -p "Introduce el email del administrador [${ADMIN_EMAIL:-admin@$FULL_FQDN}]: " NEW_EMAIL
-ADMIN_EMAIL=${NEW_EMAIL:-${ADMIN_EMAIL:-admin@$FULL_FQDN}}
+if [ "$AUTO_UPDATE" = true ]; then
+    ADMIN_EMAIL=${ADMIN_EMAIL:-"admin@$FULL_FQDN"}
+    printf "${YELLOW}Usando Email: ${NC}${GREEN}$ADMIN_EMAIL${NC}\n"
+else
+    read -p "Introduce el email del administrador [${ADMIN_EMAIL:-admin@$FULL_FQDN}]: " NEW_EMAIL
+    ADMIN_EMAIL=${NEW_EMAIL:-${ADMIN_EMAIL:-admin@$FULL_FQDN}}
+fi
 
 if [ -z "$ADMIN_EMAIL" ]; then
     printf "${RED}El email no puede estar vacío. Abortando.${NC}\n"
@@ -429,10 +446,19 @@ fi
 # Inyectar configuración dinámica (respetando lo existente si es update)
 # Preguntar por el gestor de base de datos
 CURRENT_MANAGER=${EXISTING_DB_MANAGER:-"phpmyadmin"}
-printf "${YELLOW}Selecciona el Gestor de Base de Datos [Actual: $CURRENT_MANAGER]:${NC}\n"
-printf "1) phpMyAdmin (Completo, más pesado)\n"
-printf "2) Adminer (Ligero, un solo archivo)\n"
-read -p "Opción [1-2]: " DB_MANAGER_OPT
+if [ "$AUTO_UPDATE" = true ]; then
+    DB_MANAGER_OPT="1" # Por defecto phpMyAdmin en updates automáticos si no se especifica
+    # Si ya existía uno, lo respetamos
+    if [ "$CURRENT_MANAGER" = "dbadmin" ]; then
+        DB_MANAGER_OPT="2"
+    fi
+    printf "${YELLOW}Usando Gestor de BD: ${NC}${GREEN}$CURRENT_MANAGER${NC}\n"
+else
+    printf "${YELLOW}Selecciona el Gestor de Base de Datos [Actual: $CURRENT_MANAGER]:${NC}\n"
+    printf "1) phpMyAdmin (Completo, más pesado)\n"
+    printf "2) Adminer (Ligero, un solo archivo)\n"
+    read -p "Opción [1-2]: " DB_MANAGER_OPT
+fi
 
 if [ "$DB_MANAGER_OPT" = "2" ]; then
     DB_MANAGER_DIR="dbadmin"
