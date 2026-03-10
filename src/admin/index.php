@@ -123,36 +123,7 @@ $sites = $pdo->query("
     <meta charset="UTF-8">
     <!-- El refresco se maneja por AJAX ahora -->
     <title>Hosting Admin | Control Panel</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet"    <style>
-        /* Form Toggle */
-        #new-site-form-container {
-            max-height: 0;
-            overflow: hidden;
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            opacity: 0;
-            margin-bottom: 0;
-        }
-        #new-site-form-container.show {
-            max-height: 500px;
-            opacity: 1;
-            margin-bottom: 40px;
-            padding: 24px;
-            background: rgba(79, 70, 229, 0.05);
-            border-radius: 12px;
-            border: 1px solid rgba(79, 70, 229, 0.3);
-            box-shadow: 0 0 20px rgba(79, 70, 229, 0.1);
-        }
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 40px;
-            margin-bottom: 24px;
-        }
-        .section-header h1 { margin: 0; }
-        .actions { display: flex; gap: 8px; }
-    </style>
->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">

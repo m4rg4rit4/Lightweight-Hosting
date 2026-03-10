@@ -147,3 +147,91 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     color: var(--text);
     letter-spacing: 0.02em;
 }
+
+/* DNS Management */
+.main-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+    margin-top: 32px;
+}
+.sidebar {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    height: fit-content;
+    position: sticky;
+    top: 20px;
+}
+.content {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+.domain-card {
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: all 0.2s;
+    cursor: pointer;
+    display: block;
+    text-decoration: none;
+    color: inherit;
+}
+.domain-card:hover { border-color: var(--primary); background: rgba(79, 70, 229, 0.05); }
+.domain-card.active { border-color: var(--primary); border-left: 4px solid var(--primary); background: rgba(79, 70, 229, 0.1); }
+.domain-card h4 { margin: 0; font-size: 1rem; color: var(--text); }
+.domain-card .meta { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; display: flex; gap: 8px; }
+
+.form-row { display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end; }
+.form-group-flex { flex: 1; }
+
+.type-badge { font-family: monospace; font-size: 0.75rem; font-weight: 700; padding: 4px 8px; border-radius: 4px; }
+.type-A { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+.type-CNAME { color: #8b5cf6; background: rgba(139, 92, 246, 0.1); }
+.type-MX { color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
+.type-TXT { color: #10b981; background: rgba(16, 185, 129, 0.1); }
+
+.sites-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 12px; }
+.site-item { 
+    background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 12px;
+    display: flex; flex-direction: column; gap: 12px;
+}
+.site-item .domain { font-weight: 600; font-size: 1rem; word-break: break-all; }
+.site-item .actions { display: flex; gap: 8px; margin-top: auto; }
+
+.empty-state { text-align: center; padding: 80px 40px; color: var(--text-dim); }
+.empty-state svg { width: 80px; height: 80px; margin-bottom: 20px; opacity: 0.2; }
+
+/* Dashboard and Section Headers */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 40px;
+    margin-bottom: 24px;
+}
+.section-header h1 { margin: 0; }
+.actions { display: flex; gap: 8px; }
+
+/* Forms Toggles */
+#new-site-form-container, #new-db-form {
+    max-height: 0;
+    overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0;
+    margin-bottom: 0;
+}
+#new-site-form-container.show, #new-db-form.show {
+    max-height: 500px;
+    opacity: 1;
+    margin-bottom: 40px;
+    padding: 24px;
+    background: rgba(79, 70, 229, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(79, 70, 229, 0.3);
+    box-shadow: 0 0 20px rgba(79, 70, 229, 0.1);
+}
