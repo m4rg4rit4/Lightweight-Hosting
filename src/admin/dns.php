@@ -148,6 +148,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } 
+    elseif (isset($_POST['save_soa'])) {
+        $ns = trim($_POST['soa_ns']);
+        $email = trim($_POST['soa_email']);
+        $refresh = (int)$_POST['soa_refresh'];
+        $retry = (int)$_POST['soa_retry'];
+        $expire = (int)$_POST['soa_expire'];
+        $min = (int)$_POST['soa_min'];
+        $content = "{$ns} {$email} ( {SERIAL} {$refresh} {$retry} {$expire} {$min} )";
+        
+        $action = $_POST['action'];
+        $record_id = $_POST['record_id'];
+        $domain = $_POST['domain'];
+
+        $payload = [
+            'domain' => $domain,
+            'name' => '@',
+            'type' => 'SOA',
+            'content' => $content,
+            'ttl' => 3600
+        ];
+        if ($action === 'edit_record') $payload['id'] = $record_id;
+
+        $res = dnsApiRequest($action === 'edit_record' ? '/api-dns/record/edit' : '/api-dns/record/add', 'POST', $payload);
+        if ($res['code'] === 200) {
+            $msg = "Configuración SOA actualizada correctamente.";
+            $msg_type = 'success';
+        } else {
+            $errData = @json_decode($res['response'], true);
+            $msg = "Error al actualizar SOA: " . ($errData['message'] ?? $res['error']);
+        }
+    }
     elseif ($action === 'edit_record') {
         $record_id = (int)$_POST['record_id'];
         $name = trim($_POST['name']);
@@ -259,6 +290,20 @@ if ($activeDomain) {
     }
 }
 
+// Separar registros para gestión avanzada
+$soaRecord = null;
+$soaData = ['ns' => 'ns1.'.$activeDomain.'.', 'email' => 'admin.'.$activeDomain.'.', 'refresh' => 3600, 'retry' => 1800, 'expire' => 604800, 'min' => 86400, 'serial' => '{SERIAL}'];
+if ($activeDomain) {
+    foreach ($records as $r) {
+        if ($r['type'] === 'SOA') {
+            $soaRecord = $r;
+            if (preg_match('/^([^\s]+)\s+([^\s]+)\s*\(\s*([^\s]+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\)/i', $r['content'], $m)) {
+                $soaData = ['ns' => $m[1], 'email' => $m[2], 'serial' => $m[3], 'refresh' => $m[4], 'retry' => $m[5], 'expire' => $m[6], 'min' => $m[7]];
+            }
+        }
+    }
+}
+
 // Manejo de exportación
 $exportContent = '';
 if ($activeDomain && isset($_GET['export'])) {
@@ -363,7 +408,7 @@ if ($activeDomain && isset($_GET['export'])) {
                         <h3 style="font-size: 1.1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 10px;">
                             <span>🌐</span> Sitios Web y Subdominios Vinculados
                         </h3>
-                        <div class="sites-grid">
+                        <div class="sites-grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
                             <?php 
                             $relatedSites = array_unique(array_merge([$activeDomain], $hierarchy[$activeDomain]['subs'] ?? []));
                             sort($relatedSites);
@@ -393,6 +438,83 @@ if ($activeDomain && isset($_GET['export'])) {
                         </div>
                     </div>
 
+                    <!-- Configuración SOA avanzada -->
+                    <div class="panel" style="border-left: 4px solid var(--info);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="margin:0; font-size: 1.1rem; display: flex; align-items: center; gap: 10px;">
+                                <span>⚙️</span> Parámetros de Zona (SOA)
+                            </h3>
+                            <button onclick="document.getElementById('soa-editor').style.display = (document.getElementById('soa-editor').style.display === 'none' ? 'block' : 'none')" class="btn btn-outline btn-sm">Editar SOA</button>
+                        </div>
+                        
+                        <div id="soa-editor" style="display: none; background: rgba(14, 165, 233, 0.05); padding: 20px; border-radius: 12px; border: 1px solid var(--info); margin-bottom: 20px;">
+                            <form method="POST">
+                                <input type="hidden" name="action" value="<?php echo $soaRecord ? 'edit_record' : 'add_record'; ?>">
+                                <input type="hidden" name="record_id" value="<?php echo $soaRecord['id'] ?? ''; ?>">
+                                <input type="hidden" name="domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
+                                <input type="hidden" name="name" value="@">
+                                <input type="hidden" name="type" value="SOA">
+                                <input type="hidden" name="ttl" value="3600">
+                                
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Servidor Primario (MNAME)</label>
+                                        <input type="text" name="soa_ns" value="<?php echo htmlspecialchars($soaData['ns']); ?>" required>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Email Responsable (RNAME)</label>
+                                        <input type="text" name="soa_email" value="<?php echo htmlspecialchars($soaData['email']); ?>" required>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Refresh (seg)</label>
+                                        <input type="number" name="soa_refresh" value="<?php echo $soaData['refresh']; ?>" required>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Retry (seg)</label>
+                                        <input type="number" name="soa_retry" value="<?php echo $soaData['retry']; ?>" required>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Expire (seg)</label>
+                                        <input type="number" name="soa_expire" value="<?php echo $soaData['expire']; ?>" required>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Min TTL (seg)</label>
+                                        <input type="number" name="soa_min" value="<?php echo $soaData['min']; ?>" required>
+                                    </div>
+                                </div>
+                                
+                                <div style="font-size: 0.8rem; color: var(--text-dim); margin-bottom: 15px;">
+                                    * El Serial se gestiona automáticamente con <code>{SERIAL}</code> para garantizar la propagación.
+                                </div>
+
+                                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                                    <button type="submit" name="save_soa" class="btn btn-primary">Aplicar Configuración SOA</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
+                            <div class="info-card">
+                                <div class="label">Primary NS</div>
+                                <div class="value"><?php echo htmlspecialchars($soaData['ns']); ?></div>
+                            </div>
+                            <div class="info-card">
+                                <div class="label">Admin Email</div>
+                                <div class="value"><?php echo htmlspecialchars($soaData['email']); ?></div>
+                            </div>
+                            <div class="info-card">
+                                <div class="label">Refresh / Retry</div>
+                                <div class="value"><?php echo $soaData['refresh']; ?>s / <?php echo $soaData['retry']; ?>s</div>
+                            </div>
+                             <div class="info-card">
+                                <div class="label">Serial Actual</div>
+                                <div class="value" style="color: var(--warning);"><?php echo htmlspecialchars($soaData['serial']); ?></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Gestión DNS -->
                     <div class="panel">
                         <section style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
@@ -413,11 +535,13 @@ if ($activeDomain && isset($_GET['export'])) {
                                     <div class="form-group" style="flex: 1;">
                                         <label>Tipo de Registro</label>
                                         <select name="type" id="record_type" onchange="togglePriority()" required>
-                                            <option value="A">A (Dirección IPv4)</option>
-                                            <option value="AAAA">AAAA (Dirección IPv6)</option>
+                                            <option value="A">A (IPv4)</option>
+                                            <option value="AAAA">AAAA (IPv6)</option>
                                             <option value="CNAME">CNAME (Alias)</option>
                                             <option value="MX">MX (Correo)</option>
+                                            <option value="NS">NS (Nameserver)</option>
                                             <option value="TXT">TXT (Texto)</option>
+                                            <option value="SOA">SOA (Start of Authority)</option>
                                             <option value="SRV">SRV (Servicio)</option>
                                         </select>
                                     </div>

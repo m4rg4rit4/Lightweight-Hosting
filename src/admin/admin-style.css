@@ -235,3 +235,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     border: 1px solid rgba(79, 70, 229, 0.3);
     box-shadow: 0 0 20px rgba(79, 70, 229, 0.1);
 }
+
+.info-card { background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
+.info-card .label { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px; }
+.info-card .value { font-size: 0.9rem; font-weight: 600; color: var(--text); overflow-wrap: break-word; }
