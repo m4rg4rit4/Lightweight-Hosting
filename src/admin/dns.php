@@ -345,12 +345,15 @@ if ($activeDomain && isset($_GET['export'])) {
                         <?php foreach ($hierarchy as $domain => $data): ?>
                             <a href="?domain=<?php echo urlencode($domain); ?>" class="domain-card <?php echo ($activeDomain === $domain) ? 'active' : ''; ?>">
                                 <h4><?php echo htmlspecialchars($domain); ?></h4>
-                                <div class="meta">
-                                    <span class="badge <?php echo in_array($domain, $localSites) ? 'badge-local' : 'badge-api'; ?>">
-                                        <?php echo in_array($domain, $localSites) ? 'Local' : 'DNS'; ?>
-                                    </span>
+                                <div class="meta" style="display: flex; gap: 4px; margin-top: 6px;">
+                                    <?php if (in_array($domain, $localSites)): ?>
+                                        <span class="badge badge-local" title="Este dominio tiene hosting local configurado">Sitio</span>
+                                    <?php endif; ?>
+                                    <?php if (in_array($domain, $apiZones)): ?>
+                                        <span class="badge badge-api" title="Este dominio tiene zona autoritativa en el servidor DNS">DNS</span>
+                                    <?php endif; ?>
                                     <?php if (!empty($data['subs'])): ?>
-                                        <span>• <?php echo count($data['subs']); ?> subs</span>
+                                        <span style="font-size: 0.75rem; color: var(--text-dim); margin-left: 4px;">• <?php echo count($data['subs']); ?> subs</span>
                                     <?php endif; ?>
                                 </div>
                             </a>

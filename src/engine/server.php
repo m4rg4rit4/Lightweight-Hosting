@@ -63,7 +63,8 @@ function syncDnsRecord($action, $domain) {
     foreach ($servers as $server) {
         $baseUrl = (strpos($server, 'http') === 0) ? rtrim($server, '/') : "http://" . rtrim($server, '/');
         
-        $ch = curl_init("$baseUrl/api-dns/records/" . urlencode($domain));
+        // Usamos el endpoint /api-dns/query/ para ver si el dominio ya pertenece a alguna zona
+        $ch = curl_init("$baseUrl/api-dns/query/" . urlencode($domain));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN]);
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
@@ -72,11 +73,8 @@ function syncDnsRecord($action, $domain) {
         curl_close($ch);
 
         if ($httpCode === 404 && $action === 'add') {
-            // El dominio no existe, hay que añadirlo primero
-            $payload = json_encode([
-                'domain' => $domain,
-                'ip' => $publicIP
-            ]);
+            // No existe ni el registro ni una zona padre, creamos zona nueva
+            $payload = json_encode(['domain' => $domain, 'ip' => $publicIP]);
             $chAdd = curl_init("$baseUrl/api-dns/add");
             curl_setopt($chAdd, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($chAdd, CURLOPT_POST, true);
@@ -84,29 +82,31 @@ function syncDnsRecord($action, $domain) {
             curl_setopt($chAdd, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
             curl_exec($chAdd);
             curl_close($chAdd);
-            // El endpoint /add ya crea los registros base, terminamos aquí
             break;
         }
 
         if ($httpCode === 200 && $res) {
             $data = json_decode($res, true);
             if (!empty($data['success'])) {
-                $records = $data['data']['records'] ?? [];
+                $foundRecords = $data['results'] ?? $data['records'] ?? [];
+                $targetZone = $data['zone'] ?? $domain;
+                $targetName = $data['name'] ?? '@';
 
                 if ($action === 'add') {
                     $exists = false;
-                    foreach ($records as $r) {
-                        if ($r['name'] === '@' && $r['type'] === 'A' && $r['content'] === $publicIP) {
+                    foreach ($foundRecords as $r) {
+                        if ($r['type'] === 'A' && $r['content'] === $publicIP) {
                             $exists = true;
                             break;
                         }
                     }
                     if (!$exists) {
                         $payload = json_encode([
-                            'domain' => $domain,
-                            'name' => '@',
+                            'domain' => $targetZone,
+                            'name' => $targetName,
                             'type' => 'A',
-                            'content' => $publicIP
+                            'content' => $publicIP,
+                            'ttl' => 3600
                         ]);
                         $ch2 = curl_init("$baseUrl/api-dns/record/add");
                         curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
@@ -117,9 +117,9 @@ function syncDnsRecord($action, $domain) {
                         curl_close($ch2);
                     }
                 } elseif ($action === 'del') {
-                    foreach ($records as $r) {
-                        if ($r['name'] === '@' && $r['type'] === 'A' && $r['content'] === $publicIP) {
-                            $payload = json_encode(['id' => $r['id']]);
+                    foreach ($foundRecords as $r) {
+                        if ($r['type'] === 'A' && $r['content'] === $publicIP) {
+                            $payload = json_encode(['id' => $r['id'] ?? null, 'domain' => $targetZone, 'name' => $targetName, 'type' => 'A']);
                             $ch2 = curl_init("$baseUrl/api-dns/record/del");
                             curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
                             curl_setopt($ch2, CURLOPT_POST, true);

@@ -104,10 +104,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
+// Helpers para API DNS
+function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
+    if (!defined('DNS_TOKEN') || !defined('DNS_SERVER')) return ['code' => 0, 'response' => ''];
+    $servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
+    if (empty($servers)) return ['code' => 0, 'response' => ''];
+    
+    $baseUrl = (strpos($servers[0], 'http') === 0) ? rtrim($servers[0], '/') : "http://" . rtrim($servers[0], '/');
+    $url = $baseUrl . $endpoint;
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $headers = ["Authorization: Bearer " . DNS_TOKEN, "Accept: application/json"];
+    if ($method === 'POST') {
+        curl_setopt($ch, CURLOPT_POST, true);
+        if ($data !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+            $headers[] = "Content-Type: application/json";
+        }
+    }
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 6);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ['code' => $httpCode, 'response' => $response];
+}
+
+// ---------------------------------------------------------
+// Modo Lectura GET
+// ---------------------------------------------------------
 $msg = $_SESSION['flash_msg'] ?? '';
 $msg_type = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
+// Obtener sitios ya registrados
 $sites = $pdo->query("
     SELECT s.*, 
     (SELECT COUNT(*) FROM sys_tasks t 
@@ -116,6 +147,27 @@ $sites = $pdo->query("
     FROM sys_sites s 
     ORDER BY s.id ASC
 ")->fetchAll();
+$localDomains = array_column($sites, 'domain');
+
+// Obtener zonas DNS disponibles si están habilitadas
+$apiZones = [];
+$apiAvailableZones = [];
+if (defined('DNS_TOKEN') && !empty(DNS_TOKEN)) {
+    $resZones = dnsApiRequest('/api-dns/zones', 'GET');
+    if ($resZones['code'] === 200) {
+        $dataZones = json_decode($resZones['response'], true);
+        $rawZones = $dataZones['zones'] ?? $dataZones['data'] ?? [];
+        foreach ($rawZones as $z) {
+            $domain = is_array($z) ? ($z['domain'] ?? '') : $z;
+            if ($domain) {
+                $apiZones[] = $domain;
+                if (!in_array($domain, $localDomains)) {
+                    $apiAvailableZones[] = $domain;
+                }
+            }
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -142,20 +194,41 @@ $sites = $pdo->query("
             </button>
         </div>
 
-        <div id="new-site-form-container" class="<?php echo isset($_GET['new']) ? 'show' : ''; ?>">
+        <div id="new-site-form-container" class="<?php echo (isset($_GET['new']) || isset($_GET['from_dns'])) ? 'show' : ''; ?>">
             <h2 style="margin-top: 0; font-size: 1.2rem; margin-bottom: 20px; color: var(--primary);">Añadir Nuevo Dominio</h2>
             
             <form method="POST">
                 <div class="form-group">
                     <label>Dominio (ej: misitio.com)</label>
-                    <input type="text" name="domain" required placeholder="example.com">
+                    <input type="text" name="domain" id="input_domain" required placeholder="example.com" value="<?php echo htmlspecialchars($_GET['domain'] ?? ''); ?>">
+                    
+                    <?php if (!empty($apiAvailableZones)): ?>
+                        <div style="margin-top: 12px; font-size: 0.85rem; color: var(--text-dim);">
+                            O elige de tus zonas DNS:
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+                                <?php foreach ($apiAvailableZones as $az): ?>
+                                    <button type="button" class="badge badge-api" style="cursor: pointer; border: none;" onclick="document.getElementById('input_domain').value='<?php echo htmlspecialchars($az); ?>';">
+                                        + <?php echo htmlspecialchars($az); ?>
+                                    </button>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    <?php endif; ?>
                 </div>
                 <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
                     <input type="checkbox" name="php" id="php_enabled" checked style="width: 18px; height: 18px;">
                     <label for="php_enabled" style="margin-bottom: 0;">Habilitar soporte PHP</label>
                 </div>
-                <button type="submit" class="btn btn-primary">Crear Sitio</button>
-                <button type="button" onclick="toggleNewSiteForm()" class="btn btn-outline" style="margin-left: 10px;">Cancelar</button>
+                
+                <div id="dns-warning" style="display: none; background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warning); padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9rem;">
+                    ⚠️ <span id="dns-warning-msg">Este dominio no gestionado por tus servidores DNS.</span>
+                    <br><small style="opacity: 0.8;">Deberás configurar las DNS manualmente o añadir la zona en la sección DNS.</small>
+                </div>
+
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <button type="submit" class="btn btn-primary">Crear Sitio</button>
+                    <button type="button" onclick="toggleNewSiteForm()" class="btn btn-outline">Cancelar</button>
+                </div>
             </form>
         </div>
 
@@ -267,6 +340,30 @@ $sites = $pdo->query("
             }
         }
 
+        // Script para validación dinámica de DNS
+        const apiZonesList = <?php echo json_encode($apiZones); ?>;
+        const inputDomain = document.getElementById('input_domain');
+        const dnsWarning = document.getElementById('dns-warning');
+
+        inputDomain.addEventListener('input', function() {
+            const domain = this.value.toLowerCase().trim();
+            if (domain === '') {
+                dnsWarning.style.display = 'none';
+                return;
+            }
+            
+            // Comprobar si es un subdominio de alguna zona DNS existente
+            let isManaged = false;
+            for (const zone of apiZonesList) {
+                if (domain === zone || domain.endsWith('.' + zone)) {
+                    isManaged = true;
+                    break;
+                }
+            }
+            
+            dnsWarning.style.display = (isManaged || apiZonesList.length === 0) ? 'none' : 'block';
+        });
+
         // Check if the form should be shown initially due to a message
         document.addEventListener('DOMContentLoaded', () => {
             const container = document.getElementById('new-site-form-container');
@@ -274,6 +371,8 @@ $sites = $pdo->query("
             if (container.classList.contains('show')) {
                 toggleBtn.innerHTML = '<span style="font-size: 1.2rem; margin-right: 8px;">−</span> Cancelar';
             }
+            // Trigger input check on load if there's a domain
+            if (inputDomain.value) inputDomain.dispatchEvent(new Event('input'));
         });
 
         async function checkTasks() {
