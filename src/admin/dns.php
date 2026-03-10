@@ -46,15 +46,6 @@ function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $error = curl_error($ch);
-    
-    // Log de depuración temporal
-    $log = "[" . date('Y-m-d H:i:s') . "] URL: $url | Method: $method | Code: $httpCode\n";
-    $log .= "Headers: " . implode(", ", $headers) . "\n";
-    $log .= "Payload: " . json_encode($data) . "\n";
-    $log .= "Response: " . substr($response, 0, 500) . "\n";
-    $log .= "Error: $error\n" . str_repeat('-', 50) . "\n";
-    @file_put_contents('/tmp/dns_api.log', $log, FILE_APPEND);
-    
     curl_close($ch);
 
     return [
@@ -119,15 +110,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errData = @json_decode($res['response'], true);
             $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
             
-            // Depuración de token y cabecera (solo para diagnóstico)
-            $tk = defined('DNS_TOKEN') ? DNS_TOKEN : 'NO DEFINIDO';
-            $authHeader = "Authorization: Bearer " . $tk;
-            $debugInfo = " [AuthHeader: " . substr($authHeader, 0, 25) . "... | Len: " . strlen($tk) . "]";
-            
             if (empty($errData['message']) && !empty($res['response'])) {
                 $detail .= " | " . substr(strip_tags($res['response']), 0, 150);
             }
-            $msg = "Error al crear la zona: " . $detail . $debugInfo;
+            $msg = "Error al crear la zona: " . $detail;
         }
     } 
     elseif ($action === 'add_record') {
