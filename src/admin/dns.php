@@ -127,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Validación básica
         if (!preg_match('/^[a-z0-9.*@-]*$/i', $name)) {
             $msg = "Error: El nombre del host contiene caracteres no válidos.";
-        } elseif (($type === 'A' || $type === 'AAAA') && !filter_var($content, $type === 'A' ? FILTER_VALIDATE_IP : FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        } elseif (($type === 'A' || $type === 'AAAA') && !filter_var($content, FILTER_VALIDATE_IP, $type === 'A' ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6)) {
              $msg = "Error: La dirección IP no es válida.";
         } else {
             $res = dnsApiRequest('/api-dns/record/add', 'POST', [
@@ -158,6 +158,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!preg_match('/^[a-z0-9.*@-]*$/i', $name)) {
             $msg = "Error: El nombre del host contiene caracteres no válidos.";
+        } elseif (($type === 'A' || $type === 'AAAA') && !filter_var($content, FILTER_VALIDATE_IP, $type === 'A' ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6)) {
+            $msg = "Error: La dirección IP no es válida.";
         } else {
             $res = dnsApiRequest('/api-dns/record/edit', 'POST', [
                 'id' => $record_id,
