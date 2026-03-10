@@ -14,6 +14,14 @@ NC='\033[0m' # No Color
 
 printf "${GREEN}Iniciando instalación ultra-ligera del sistema de hosting...${NC}\n"
 
+# Obtener versión local
+if [ -f "VERSION" ]; then
+    VERSION=$(cat VERSION)
+else
+    VERSION="1.1.0"
+fi
+printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
+
 # Autocuración: Eliminar posibles configs corruptas de intentos previos
 rm -f /etc/apt/apt.conf.d/01lean /etc/dpkg/dpkg.cfg.d/01lean
 
@@ -375,6 +383,7 @@ curl -sSL "$REPO_RAW/src/admin/databases.php" -o "$TEMP_DIR/databases.php"
 curl -sSL "$REPO_RAW/src/admin/backups.php" -o "$TEMP_DIR/backups.php"
 curl -sSL "$REPO_RAW/src/admin/header.php" -o "$TEMP_DIR/header.php"
 curl -sSL "$REPO_RAW/src/admin/dns.php" -o "$TEMP_DIR/dns.php"
+curl -sSL "$REPO_RAW/src/admin/admin-style.css" -o "$TEMP_DIR/admin-style.css"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
@@ -397,6 +406,7 @@ cp "$TEMP_DIR/databases.php" "$ADMIN_PATH/databases.php"
 cp "$TEMP_DIR/backups.php" "$ADMIN_PATH/backups.php"
 cp "$TEMP_DIR/header.php" "$ADMIN_PATH/header.php"
 cp "$TEMP_DIR/dns.php" "$ADMIN_PATH/dns.php"
+cp "$TEMP_DIR/admin-style.css" "$ADMIN_PATH/admin-style.css"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
@@ -447,6 +457,7 @@ define('DNS_DOMAIN', '$DNS_DOMAIN');
 define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
 define('LETSENCRYPT_EMAIL', '$ADMIN_EMAIL');
 define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
+define('SYSTEM_VERSION', '$VERSION');
 define('HOSTING_INSTALLED', 'true');
 EOF
 
@@ -676,7 +687,7 @@ fi
 systemctl restart mariadb
 
 printf "${GREEN}====================================================${NC}\n"
-printf "${GREEN} INSTALACIÓN COMPLETADA CON ÉXITO${NC}\n"
+printf "${GREEN} INSTALACIÓN COMPLETADA CON ÉXITO (v$VERSION)${NC}\n"
 printf "${GREEN}====================================================${NC}\n"
 printf "CPU: 1 vCore | RAM: 1GB | DISCO: 10GB Limit\n"
 printf "Apache MPM: Event (Optimizado)\n"

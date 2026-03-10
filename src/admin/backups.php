@@ -114,102 +114,12 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
     <title>Backups MEGA | Hosting Admin</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --bg: #0f172a;
-            --card-bg: #1e293b;
-            --text: #f8fafc;
-            --text-dim: #94a3b8;
-            --border: #334155;
-            --success: #10b981;
-            --error: #ef4444;
-            --warning: #f59e0b;
-            --info: #0ea5e9;
-        }
-        body { 
-            font-family: 'Outfit', sans-serif; 
-            background: var(--bg); 
-            color: var(--text);
-            margin: 0;
-            padding: 40px 20px;
-            line-height: 1.5;
-        }
-        .container { 
-            max-width: 1000px; 
-            background: var(--card-bg); 
-            padding: 32px; 
-            border-radius: 16px; 
-            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); 
-            margin: auto; 
-            border: 1px solid var(--border);
-        }
-        nav { 
-            margin-bottom: 32px; 
-            padding-bottom: 16px; 
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-        nav strong { font-size: 1.25rem; color: var(--primary); }
-        nav a { text-decoration: none; color: var(--text-dim); transition: color 0.2s; font-weight: 500; }
-        nav a.active { color: var(--text); }
-        nav a:hover { color: var(--text); }
-        h1, h2 { margin-top: 0; font-weight: 600; }
-        
-        .alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 24px; font-size: 0.9rem; border: 1px solid transparent; }
-        .alert-success { background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2); }
-        .alert-error { background: rgba(239, 68, 68, 0.1); color: var(--error); border-color: rgba(239, 68, 68, 0.2); }
-        .alert-info { background: rgba(14, 165, 233, 0.1); color: var(--info); border-color: rgba(14, 165, 233, 0.2); }
-        .alert-warning { background: rgba(245, 158, 11, 0.1); color: var(--warning); border-color: rgba(245, 158, 11, 0.2); }
-
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; color: var(--text-dim); font-size: 0.9rem; }
-        input[type="text"], input[type="email"], input[type="password"], input[type="number"] { 
-            width: 100%; 
-            padding: 10px 14px; 
-            background: var(--bg); 
-            border: 1px solid var(--border); 
-            border-radius: 8px; 
-            color: var(--text); 
-            font-family: inherit;
-            box-sizing: border-box;
-        }
-        input:focus { outline: none; border-color: var(--primary); }
-        
-        .btn { 
-            padding: 8px 16px; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            font-weight: 600; 
-            font-family: inherit;
-            border: none;
-            font-size: 0.85rem;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .btn-primary { background: var(--primary); color: white; }
-        .btn-primary:hover { background: var(--primary-hover); }
-        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
-        .btn-outline:hover { background: var(--border); }
-        .btn-danger { color: var(--error); border: 1px solid rgba(239, 68, 68, 0.3); background: transparent; }
-        .btn-danger:hover { background: rgba(239, 68, 68, 0.1); }
-        .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
-
         .mega-card { background: rgba(79, 70, 229, 0.05); border: 1px solid rgba(79, 70, 229, 0.2); padding: 24px; border-radius: 12px; margin-bottom: 32px; }
         .mega-logged { display: flex; align-items: center; justify-content: space-between; }
         .mega-status { display: flex; align-items: center; gap: 10px; font-weight: 600; }
         .dot-green { width: 10px; height: 10px; background: var(--success); border-radius: 50%; display: inline-block; }
         .dot-red { width: 10px; height: 10px; background: var(--error); border-radius: 50%; display: inline-block; }
 
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-dim); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
-        td { padding: 16px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-        tr:last-child td { border-bottom: none; }
-        
         .site-header { background: rgba(0,0,0,0.1); padding: 12px 16px; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; margin-top: 32px; border: 1px solid var(--border); border-bottom: none; }
         .site-body { border: 1px solid var(--border); border-radius: 0 0 8px 8px; padding: 0 16px; }
         

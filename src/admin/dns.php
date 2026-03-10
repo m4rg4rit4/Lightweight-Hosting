@@ -97,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $msg = '';
     $msg_type = 'error';
 
-    if ($action === 'add_zone') {
+    if ($action === 'add_zone' || $action === 'add_local_zone') {
         $newZone = strtolower(trim($_POST['new_domain']));
         $targetIp = trim($_POST['target_ip']);
         
@@ -117,23 +117,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } 
     elseif ($action === 'add_record') {
-        $res = dnsApiRequest('/api-dns/record/add', 'POST', [
-            'domain' => trim($_POST['domain']),
-            'name' => trim($_POST['name']),
-            'type' => trim($_POST['type']),
-            'content' => trim($_POST['content']),
-            'ttl' => (int)trim($_POST['ttl']),
-            'priority' => !empty($_POST['priority']) ? (int)trim($_POST['priority']) : null
-        ]);
-        
-        if ($res['code'] === 200) {
-            $msg = "Registro " . $_POST['type'] . " insertado correctamente.";
-            $msg_type = 'success';
+        $name = trim($_POST['name']);
+        $type = trim($_POST['type']);
+        $content = trim($_POST['content']);
+        $ttl = (int)trim($_POST['ttl']);
+        $priority = !empty($_POST['priority']) ? (int)trim($_POST['priority']) : null;
+        $domain = trim($_POST['domain']);
+
+        // Validación básica
+        if (!preg_match('/^[a-z0-9.*@-]*$/i', $name)) {
+            $msg = "Error: El nombre del host contiene caracteres no válidos.";
+        } elseif (($type === 'A' || $type === 'AAAA') && !filter_var($content, $type === 'A' ? FILTER_VALIDATE_IP : FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+             $msg = "Error: La dirección IP no es válida.";
         } else {
-            $errData = @json_decode($res['response'], true);
-            $msg = "No se pudo añadir el registro: " . ($errData['message'] ?? $res['error'] ?? "Cód {$res['code']}");
+            $res = dnsApiRequest('/api-dns/record/add', 'POST', [
+                'domain' => $domain,
+                'name' => $name,
+                'type' => $type,
+                'content' => $content,
+                'ttl' => $ttl,
+                'priority' => $priority
+            ]);
+            
+            if ($res['code'] === 200) {
+                $msg = "Registro $type insertado correctamente.";
+                $msg_type = 'success';
+            } else {
+                $errData = @json_decode($res['response'], true);
+                $msg = "No se pudo añadir el registro: " . ($errData['message'] ?? $res['error'] ?? "Cód {$res['code']}");
+            }
         }
     } 
+    elseif ($action === 'edit_record') {
+        $record_id = (int)$_POST['record_id'];
+        $name = trim($_POST['name']);
+        $type = trim($_POST['type']);
+        $content = trim($_POST['content']);
+        $ttl = (int)trim($_POST['ttl']);
+        $priority = !empty($_POST['priority']) ? (int)trim($_POST['priority']) : null;
+
+        if (!preg_match('/^[a-z0-9.*@-]*$/i', $name)) {
+            $msg = "Error: El nombre del host contiene caracteres no válidos.";
+        } else {
+            $res = dnsApiRequest('/api-dns/record/edit', 'POST', [
+                'id' => $record_id,
+                'name' => $name,
+                'type' => $type,
+                'content' => $content,
+                'ttl' => $ttl,
+                'priority' => $priority
+            ]);
+            
+            if ($res['code'] === 200) {
+                $msg = "Registro actualizado correctamente.";
+                $msg_type = 'success';
+            } else {
+                $errData = @json_decode($res['response'], true);
+                $msg = "Error al editar el registro: " . ($errData['message'] ?? $res['error'] ?? "Cód {$res['code']}");
+            }
+        }
+    }
     elseif ($action === 'delete_record') {
         $res = dnsApiRequest('/api-dns/record/del', 'POST', [
             'id' => (int)$_POST['record_id']
@@ -228,33 +271,44 @@ if ($activeDomain && isset($_GET['export'])) {
 <head>
     <meta charset="UTF-8">
     <title>Hosting Admin | Gestión DNS y Dominios</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --bg: #0f172a;
-            --card-bg: #1e293b;
-            --text: #f8fafc;
-            --text-dim: #94a3b8;
-            --border: #334155;
-            --success: #10b981;
-            --error: #ef4444;
-            --warning: #f59e0b;
-            --info: #0ea5e9;
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=sw    <style>
+        .domain-card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+            cursor: pointer;
+            display: block;
+            text-decoration: none;
+            color: inherit;
         }
-        body { 
-            font-family: 'Outfit', sans-serif; 
-            background: var(--bg); 
-            color: var(--text);
-            margin: 0;
-            padding: 40px 20px;
-            line-height: 1.5;
+        .domain-card:hover { border-color: var(--primary); background: rgba(79, 70, 229, 0.05); }
+        .domain-card.active { border-color: var(--primary); border-left: 4px solid var(--primary); background: rgba(79, 70, 229, 0.1); }
+        .domain-card h4 { margin: 0; font-size: 1rem; color: var(--text); }
+        .domain-card .meta { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; display: flex; gap: 8px; }
+
+        .form-row { display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end; }
+        .form-group { flex: 1; }
+        
+        .type-badge { font-family: monospace; font-size: 0.75rem; font-weight: 700; padding: 4px 8px; border-radius: 4px; }
+        .type-A { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+        .type-CNAME { color: #8b5cf6; background: rgba(139, 92, 246, 0.1); }
+        .type-MX { color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
+        .type-TXT { color: #10b981; background: rgba(16, 185, 129, 0.1); }
+
+        .sites-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 12px; }
+        .site-item { 
+            background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 12px;
+            display: flex; flex-direction: column; gap: 12px;
         }
-        .container { 
-            max-width: 1200px; 
-            margin: auto; 
-        }
+        .site-item .domain { font-weight: 600; font-size: 1rem; word-break: break-all; }
+        .site-item .actions { display: flex; gap: 8px; margin-top: auto; }
+
+        .empty-state { text-align: center; padding: 80px 40px; color: var(--text-dim); }
+        .empty-state svg { width: 80px; height: 80px; margin-bottom: 20px; opacity: 0.2; }
+
         .main-layout {
             display: grid;
             grid-template-columns: 320px 1fr;
@@ -275,98 +329,12 @@ if ($activeDomain && isset($_GET['export'])) {
             flex-direction: column;
             gap: 24px;
         }
-        .panel {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-        .alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 24px; font-size: 0.9rem; border: 1px solid transparent; }
-        .alert-success { background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2); }
-        .alert-error { background: rgba(239, 68, 68, 0.1); color: var(--error); border-color: rgba(239, 68, 68, 0.2); }
-        
-        .btn { 
-            padding: 10px 18px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: 600; 
-            font-family: inherit;
-            border: none;
-            font-size: 0.85rem;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            text-decoration: none;
-            gap: 8px;
-        }
-        .btn-primary { background: var(--primary); color: white; }
-        .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
-        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
-        .btn-outline:hover { background: var(--border); }
-        .btn-danger { color: var(--error); background: transparent; border: 1px solid rgba(239, 68, 68, 0.2); }
-        .btn-danger:hover { background: rgba(239, 68, 68, 0.1); border-color: var(--error); }
-        
-        .domain-card {
-            background: rgba(30, 41, 59, 0.5);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 12px;
-            transition: all 0.2s;
-            cursor: pointer;
-            display: block;
-            text-decoration: none;
-            color: inherit;
-        }
-        .domain-card:hover { border-color: var(--primary); background: rgba(79, 70, 229, 0.05); }
-        .domain-card.active { border-color: var(--primary); border-left: 4px solid var(--primary); background: rgba(79, 70, 229, 0.1); }
-        .domain-card h4 { margin: 0; font-size: 1rem; color: var(--text); }
-        .domain-card .meta { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; display: flex; gap: 8px; }
-
-        .form-row { display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end; }
-        .form-group { flex: 1; }
-        label { display: block; margin-bottom: 6px; color: var(--text-dim); font-size: 0.85rem; }
-        input, select { 
-            width: 100%; box-sizing: border-box;
-            padding: 10px 14px; 
-            background: var(--bg); 
-            border: 1px solid var(--border); 
-            border-radius: 8px; 
-            color: var(--text); 
-            font-family: inherit;
-        }
-        input:focus, select:focus { outline: none; border-color: var(--primary); }
-        
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; }
-        td { padding: 16px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-        tr:hover td { background: rgba(255,255,255,0.02); }
-        
-        .badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
-        .badge-api { background: rgba(14, 165, 233, 0.1); color: var(--info); }
-        .badge-local { background: rgba(16, 185, 129, 0.1); color: var(--success); }
-
-        .type-badge { font-family: monospace; font-size: 0.75rem; font-weight: 700; padding: 4px 8px; border-radius: 4px; }
-        .type-A { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
-        .type-CNAME { color: #8b5cf6; background: rgba(139, 92, 246, 0.1); }
-        .type-MX { color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
-        .type-TXT { color: #10b981; background: rgba(16, 185, 129, 0.1); }
-
-        .sites-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 12px; }
-        .site-item { 
-            background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: 12px;
-            display: flex; flex-direction: column; gap: 12px;
-        }
-        .site-item .domain { font-weight: 600; font-size: 1rem; word-break: break-all; }
-        .site-item .actions { display: flex; gap: 8px; margin-top: auto; }
-
-        .empty-state { text-align: center; padding: 80px 40px; color: var(--text-dim); }
-        .empty-state svg { width: 80px; height: 80px; margin-bottom: 20px; opacity: 0.2; }
+    </style>
+ 0.2; }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="containerStandard" style="max-width: 1200px; margin: auto;">
         <?php include 'header.php'; ?>
 
         <?php if ($msg): ?>
@@ -426,6 +394,14 @@ if ($activeDomain && isset($_GET['export'])) {
                                     <span class="badge <?php echo in_array($activeDomain, $localSites) ? 'badge-local' : 'badge-api'; ?>" style="padding: 4px 10px; font-size: 0.8rem;">
                                         <?php echo in_array($activeDomain, $localSites) ? 'Hosting Local' : 'Zona DNS'; ?>
                                     </span>
+                                    <?php if (in_array($activeDomain, $localSites) && !in_array($activeDomain, $apiZones)): ?>
+                                        <form method="POST" style="display:inline;">
+                                            <input type="hidden" name="action" value="add_local_zone">
+                                            <input type="hidden" name="new_domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
+                                            <input type="hidden" name="target_ip" value="">
+                                            <button type="submit" class="btn btn-primary btn-sm" style="margin-left: 10px;">⚡ Alta en Servidor DNS</button>
+                                        </form>
+                                    <?php endif; ?>
                                 </div>
                                 <p style="color: var(--text-dim); margin: 8px 0 0 0;">Gestión jerárquica de subdominios y servicios asociados.</p>
                             </div>
@@ -554,15 +530,21 @@ if ($activeDomain && isset($_GET['export'])) {
                                                 <td style="font-weight: 500; font-family: monospace; color: var(--text);"><?php echo htmlspecialchars($r['name']); ?></td>
                                                 <td style="color: var(--text-dim); font-family: monospace; font-size: 0.9rem; max-width: 350px; overflow-wrap: break-word;"><?php echo htmlspecialchars($r['content']); ?></td>
                                                 <td style="color: var(--text-dim); font-size: 0.8rem;"><?php echo $r['ttl']; ?>s</td>
-                                                <td style="text-align: right;">
-                                                    <form method="POST" onsubmit="return confirm('¿Eliminar de forma permanente este registro DNS?');">
-                                                        <input type="hidden" name="action" value="delete_record">
-                                                        <input type="hidden" name="record_id" value="<?php echo $r['id']; ?>">
-                                                        <button type="submit" class="btn btn-danger" style="padding: 6px; border-radius: 6px;" title="Eliminar Registro">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                                 <td style="text-align: right;">
+                                                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                                        <button type="button" class="btn btn-outline" style="padding: 6px; border-radius: 6px;" title="Editar Registro" 
+                                                            onclick="editRecord(<?php echo htmlspecialchars(json_encode($r)); ?>)">
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                                                         </button>
-                                                    </form>
-                                                </td>
+                                                        <form method="POST" onsubmit="return confirm('¿Eliminar de forma permanente este registro DNS?');">
+                                                            <input type="hidden" name="action" value="delete_record">
+                                                            <input type="hidden" name="record_id" value="<?php echo $r['id']; ?>">
+                                                            <button type="submit" class="btn btn-danger" style="padding: 6px; border-radius: 6px;" title="Eliminar Registro">
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                 </td>
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -608,17 +590,65 @@ if ($activeDomain && isset($_GET['export'])) {
             group.style.display = (type === 'MX' || type === 'SRV') ? 'block' : 'none';
         }
 
+        function editRecord(record) {
+            const rowAdd = document.getElementById('row-add-record');
+            rowAdd.style.display = 'block';
+            
+            // Cambiar textos y valores para modo edición
+            rowAdd.querySelector('h3') ? rowAdd.querySelector('h3').innerText = 'Editar Registro DNS' : null;
+            rowAdd.querySelector('input[name="action"]').value = 'edit_record';
+            
+            // Añadir campo oculto ID si no existe
+            if (!rowAdd.querySelector('input[name="record_id"]')) {
+                const hiddenId = document.createElement('input');
+                hiddenId.type = 'hidden';
+                hiddenId.name = 'record_id';
+                rowAdd.querySelector('form').appendChild(hiddenId);
+            }
+            rowAdd.querySelector('input[name="record_id"]').value = record.id;
+            
+            // Cargar valores
+            rowAdd.querySelector('select[name="type"]').value = record.type;
+            rowAdd.querySelector('input[name="name"]').value = record.name;
+            rowAdd.querySelector('input[name="content"]').value = record.content;
+            rowAdd.querySelector('input[name="ttl"]').value = record.ttl;
+            if (record.priority) {
+                rowAdd.querySelector('input[name="priority"]').value = record.priority;
+            }
+            
+            togglePriority();
+            rowAdd.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function checkTasks() {
+            try {
+                const response = await fetch('tasks_status.php?t=' + Date.now());
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+                const notification = document.getElementById('task-notification');
+                if (data.pending_count > 0) {
+                    notification.style.display = 'flex';
+                } else {
+                    notification.style.display = 'none';
+                }
+            } catch (error) { console.error('Error checking tasks:', error); }
+        }
+        setInterval(checkTasks, 5000);
+        checkTasks();
+
         // Cerrar modal al hacer clic fuera
         window.onclick = function(event) {
             const modal = document.getElementById('modal-add');
             if (event.target == modal) modal.style.display = "none";
         }
         
-        // Atajos de teclado
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 document.getElementById('modal-add').style.display = 'none';
                 document.getElementById('row-add-record').style.display = 'none';
+                // Reset a modo añadir si se cancela edición
+                const rowAdd = document.getElementById('row-add-record');
+                rowAdd.querySelector('input[name="action"]').value = 'add_record';
             }
         });
     </script>

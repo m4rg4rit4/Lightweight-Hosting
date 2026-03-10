@@ -1,5 +1,11 @@
+<link rel="stylesheet" href="admin-style.css">
 <nav>
-    <strong>Lightweight Hosting</strong>
+    <div style="display: flex; flex-direction: column;">
+        <strong>Lightweight Hosting</strong>
+        <?php if (defined('SYSTEM_VERSION')): ?>
+            <span style="font-size: 0.7rem; color: var(--text-dim); margin-top: -4px;">v<?php echo SYSTEM_VERSION; ?></span>
+        <?php endif; ?>
+    </div>
     <?php
     $current_page = basename($_SERVER['PHP_SELF']);
     ?>
@@ -20,10 +26,8 @@
         <span style="font-weight: 600;"><?php echo htmlspecialchars($site['domain']); ?></span>
     <?php endif; ?>
     
-    <?php if ($current_page === 'index.php'): ?>
-        <a href="tasks.php" id="task-notification" style="display: none; text-decoration: none;" class="notification-container">
-            <span class="notification-dot"></span>
-            <span class="pending-text">TAREAS PENDIENTES</span>
-        </a>
-    <?php endif; ?>
+    <a href="tasks.php" id="task-notification" style="display: none; text-decoration: none;" class="notification-container">
+        <span class="notification-dot"></span>
+        <span class="pending-text">TAREAS PENDIENTES</span>
+    </a>
 </nav>

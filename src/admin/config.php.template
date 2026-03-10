@@ -6,8 +6,9 @@ define('DB_PASS', '{{DB_ADMIN_PASS}}');
 define('ADMIN_EMAIL', '{{ADMIN_EMAIL}}');
 define('DNS_HOSTNAME', '{{DNS_HOSTNAME}}');
 define('LETSENCRYPT_EMAIL', '{{LETSENCRYPT_EMAIL}}');
-// define('DNS_TOKEN', '{{DNS_TOKEN}}');
-// define('DNS_SERVER', '{{DNS_SERVER}}');
+// define('LETSENCRYPT_EMAIL', '{{ADMIN_EMAIL}}');
+define('DB_MANAGER_DIR', '{{DB_MANAGER_DIR}}');
+define('SYSTEM_VERSION', '{{VERSION}}');
 define('HOSTING_INSTALLED', 'true');
 
 function getPDO() {

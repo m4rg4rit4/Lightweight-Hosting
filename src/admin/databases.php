@@ -128,43 +128,8 @@ $processing_count = $is_processing->fetchColumn();
     <title>Bases de Datos | <?php echo htmlspecialchars($site['domain']); ?></title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --bg: #0f172a;
-            --card-bg: #1e293b;
-            --text: #f8fafc;
-            --text-dim: #94a3b8;
-            --border: #334155;
-            --success: #10b981;
-            --error: #ef4444;
-            --warning: #f59e0b;
-            --info: #0ea5e9;
-        }
-        body { font-family: 'Outfit', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; line-height: 1.5; }
-        .container { max-width: 1000px; background: var(--card-bg); padding: 32px; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); margin: auto; border: 1px solid var(--border); }
-        nav { margin-bottom: 32px; padding-bottom: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 20px; }
-        nav strong { font-size: 1.25rem; color: var(--primary); }
-        nav a { text-decoration: none; color: var(--text-dim); transition: color 0.2s; font-weight: 500; }
-        nav a:hover { color: var(--text); }
-        h1 { font-size: 1.5rem; margin-top: 0; margin-bottom: 24px; font-weight: 600; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-        td { padding: 16px 12px; border-bottom: 1px solid var(--border); }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; color: var(--text-dim); font-size: 0.9rem; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; box-sizing: border-box; }
-        .btn { padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; border: none; font-size: 0.85rem; transition: all 0.2s; text-decoration: none; display: inline-flex; align-items: center; }
-        .btn-primary { background: var(--primary); color: white; }
-        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
-        .btn-danger { color: var(--error); }
-        .btn-danger:hover { background: rgba(239, 68, 68, 0.1); }
-        .alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 24px; font-size: 0.9rem; border: 1px solid transparent; }
-        .alert-success { background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2); }
-        .alert-error { background: rgba(239, 68, 68, 0.1); color: var(--error); border-color: rgba(239, 68, 68, 0.2); }
         #new-db-form { display: none; background: rgba(79, 70, 229, 0.05); padding: 24px; border-radius: 12px; border: 1px solid rgba(79, 70, 229, 0.3); margin-bottom: 32px; }
-        .badge-running { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; background: rgba(14, 165, 233, 0.1); color: var(--info); border: 1px solid rgba(14, 165, 233, 0.2); }
     </style>
 </head>
 <body>

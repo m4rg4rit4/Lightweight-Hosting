@@ -21,5 +21,10 @@ description: Reglas y restricciones de hardware del proyecto
 
 # Gestión de Repositorio
 - **GitHub**: Es OBLIGATORIO subir todos los cambios al repositorio de GitHub al finalizar cada sesión de trabajo o tras implementar una funcionalidad clave.
+- **Procedimiento de Subida Seguro (Windows/PowerShell)**:
+  1. Ejecutar comandos de forma individual (evitar `&&` que puede fallar en ciertos shells).
+  2. `git add .`
+  3. `git commit -m "Mensaje en ASCII"` (Evitar tildes o caracteres especiales en el commit si el shell no está en UTF-8 para prevenir errores de parsing).
+  4. `git push origin main`
 
 # Importante, actualizar siempre la documentación
