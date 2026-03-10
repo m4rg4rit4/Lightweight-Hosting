@@ -46,6 +46,15 @@ function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $error = curl_error($ch);
+    
+    // Log de depuración temporal
+    $log = "[" . date('Y-m-d H:i:s') . "] URL: $url | Method: $method | Code: $httpCode\n";
+    $log .= "Headers: " . implode(", ", $headers) . "\n";
+    $log .= "Payload: " . json_encode($data) . "\n";
+    $log .= "Response: " . substr($response, 0, 500) . "\n";
+    $log .= "Error: $error\n" . str_repeat('-', 50) . "\n";
+    @file_put_contents('/tmp/dns_api.log', $log, FILE_APPEND);
+    
     curl_close($ch);
 
     return [
