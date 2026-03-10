@@ -119,14 +119,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errData = @json_decode($res['response'], true);
             $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
             
-            // Depuración de token (solo para diagnóstico)
+            // Depuración de token y cabecera (solo para diagnóstico)
             $tk = defined('DNS_TOKEN') ? DNS_TOKEN : 'NO DEFINIDO';
-            $debugTk = " [Len: " . strlen($tk) . ", Star: " . substr($tk, 0, 4) . "...]";
+            $authHeader = "Authorization: Bearer " . $tk;
+            $debugInfo = " [AuthHeader: " . substr($authHeader, 0, 25) . "... | Len: " . strlen($tk) . "]";
             
             if (empty($errData['message']) && !empty($res['response'])) {
                 $detail .= " | " . substr(strip_tags($res['response']), 0, 150);
             }
-            $msg = "Error al crear la zona: " . $detail . $debugTk;
+            $msg = "Error al crear la zona: " . $detail . $debugInfo;
         }
     } 
     elseif ($action === 'add_record') {
