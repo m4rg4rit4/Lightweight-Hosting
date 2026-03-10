@@ -279,7 +279,7 @@ if ($activeDomain) {
     if ($res['code'] === 200) {
         $data = json_decode($res['response'], true);
         if ($data['success']) {
-            $records = $data['data']['records'] ?? [];
+            $records = $data['records'] ?? [];
         } else {
             $apiError = $data['message'] ?? "Error desconocido en API";
         }
