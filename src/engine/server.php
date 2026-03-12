@@ -33,8 +33,9 @@ if (!file_exists($php_socket)) {
 }
 
 // Garantizar que NUNCA esté vacío para evitar "400 Bad Request"
-if (empty($php_socket)) {
-    $php_socket = "/run/php/php8.4-fpm.sock"; // Fallback final razonable para Debian 13
+if (empty($php_socket) || !file_exists($php_socket)) {
+    $found_any = glob("/run/php/php*-fpm.sock");
+    $php_socket = !empty($found_any) ? $found_any[0] : "/run/php/php8.2-fpm.sock";
 }
 
 require '/var/www/admin_panel/config.php';
@@ -166,16 +167,21 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     $vhost .= "    </Directory>\n\n";
     
     // DB Manager access (Global Alias)
+    $db_manager = defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'phpmyadmin';
     $vhost .= "    Alias /phpmyadmin /var/www/admin_panel/phpmyadmin\n";
     $vhost .= "    Alias /dbadmin /var/www/admin_panel/dbadmin\n";
-    $vhost .= "    <Directory /var/www/admin_panel/phpmyadmin>\n";
-    $vhost .= "        Options -Indexes +FollowSymLinks\n";
-    $vhost .= "        AllowOverride All\n";
-    $vhost .= "        Require all granted\n";
-    $vhost .= "        <FilesMatch \.php$>\n";
-    $vhost .= "            SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
-    $vhost .= "        </FilesMatch>\n";
-    $vhost .= "    </Directory>\n\n";
+    
+    $manager_path = "/var/www/admin_panel/$db_manager";
+    if (file_exists($manager_path)) {
+        $vhost .= "    <Directory $manager_path>\n";
+        $vhost .= "        Options -Indexes +FollowSymLinks\n";
+        $vhost .= "        AllowOverride All\n";
+        $vhost .= "        Require all granted\n";
+        $vhost .= "        <FilesMatch \.php$>\n";
+        $vhost .= "            SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
+        $vhost .= "        </FilesMatch>\n";
+        $vhost .= "    </Directory>\n\n";
+    }
     
     if ($php_enabled) {
         $vhost .= "    <FilesMatch \.php$>\n";
@@ -264,10 +270,8 @@ foreach ($tasks as $task) {
             if (($isEmpty || $isMainRoot) && file_exists($templatePath)) {
                 // Si es root de apache por defecto, quitar el de Debian si existe
                 if ($isMainRoot && file_exists($indexPath)) {
-                    $content = file_get_contents($indexPath);
-                    if (strpos($content, "Debian") !== false || strpos($content, "Apache2 Debian Default Page") !== false) {
-                        unlink($indexPath);
-                    }
+                    // Limpieza agresiva del index por defecto de Debian
+                    unlink($indexPath);
                 }
                 
                 if (!file_exists($indexPath) && !file_exists($indexPhpPath)) {
@@ -277,7 +281,21 @@ foreach ($tasks as $task) {
             }
             file_put_contents("/etc/apache2/sites-available/$domain.conf", generateVhost($domain, $path, $php, $php_v));
             $safeDomainConf = escapeshellarg("$domain.conf");
-            shell_exec("$cmd_a2ensite $safeDomainConf && $cmd_apache_reload");
+            
+            // Desactivar sitios por defecto de Apache para evitar interferencias
+            shell_exec("$cmd_a2dissite 000-default.conf 2>/dev/null");
+            shell_exec("$cmd_a2dissite default-ssl.conf 2>/dev/null");
+            
+            // Validar sintaxis antes de recargar
+            $check = shell_exec("/usr/sbin/apache2ctl -t 2>&1");
+            if (strpos($check, "Syntax OK") !== false) {
+                shell_exec("$cmd_a2ensite $safeDomainConf && $cmd_apache_reload");
+                $success = true;
+            } else {
+                $msg = "Apache Config Error: " . trim($check);
+                $pdo->prepare("UPDATE sys_tasks SET status = 'error', result_msg = ? WHERE id = ?")->execute([$msg, $taskId]);
+                continue 2;
+            }
             $pdo->prepare("UPDATE sys_sites SET status = 'active' WHERE domain = ?")->execute([$domain]);
             $msg = "Site $domain created.";
             $success = true;
