@@ -500,6 +500,7 @@ foreach ($tasks as $task) {
                 $safeDbUserDel = str_replace("'", "''", $db['db_user']);
                 shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `$safeDbNameDel`;"));
                 shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$safeDbUserDel'@'127.0.0.1';"));
+                shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$safeDbUserDel'@'localhost';"));
             }
             $pdo->prepare("DELETE FROM sys_databases WHERE site_id = ?")->execute([$siteId]);
 
@@ -525,6 +526,8 @@ foreach ($tasks as $task) {
             // 2. Crear Usuario y Permisos (usando Identificado por para compatibilidad)
             shell_exec("mariadb $auth -e " . escapeshellarg("CREATE USER IF NOT EXISTS '$safeDbUser'@'127.0.0.1' IDENTIFIED BY '$safeDbPass';"));
             shell_exec("mariadb $auth -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `$safeDbName`.* TO '$safeDbUser'@'127.0.0.1';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("CREATE USER IF NOT EXISTS '$safeDbUser'@'localhost' IDENTIFIED BY '$safeDbPass';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `$safeDbName`.* TO '$safeDbUser'@'localhost';"));
             shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
             
             $pdo->prepare("INSERT INTO sys_databases (site_id, db_name, db_user, db_pass) VALUES (?, ?, ?, ?)")
@@ -546,6 +549,7 @@ foreach ($tasks as $task) {
             
             shell_exec("mariadb $auth -e " . escapeshellarg("DROP DATABASE IF EXISTS `$safeDbName`;"));
             shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$safeDbUser'@'127.0.0.1';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("DROP USER IF EXISTS '$safeDbUser'@'localhost';"));
             shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
             
             $pdo->prepare("DELETE FROM sys_databases WHERE db_name = ?")->execute([$dbName]);
@@ -565,6 +569,7 @@ foreach ($tasks as $task) {
             $safeNewPass = str_replace("'", "''", $newPass);
             
             shell_exec("mariadb $auth -e " . escapeshellarg("ALTER USER '$safeDbUser'@'127.0.0.1' IDENTIFIED BY '$safeNewPass';"));
+            shell_exec("mariadb $auth -e " . escapeshellarg("ALTER USER '$safeDbUser'@'localhost' IDENTIFIED BY '$safeNewPass';"));
             shell_exec("mariadb $auth -e " . escapeshellarg("FLUSH PRIVILEGES;"));
             
             $pdo->prepare("UPDATE sys_databases SET db_pass = ? WHERE db_user = ? AND db_name = ?")->execute([$newPass, $dbUser, $dbName]);
