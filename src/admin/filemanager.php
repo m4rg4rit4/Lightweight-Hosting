@@ -162,18 +162,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'delete':
                 if ($fullPath === realpath($baseDir)) throw new Exception("No puedes borrar el directorio raíz.");
                 if (is_dir($fullPath)) {
-                    // Recursive directory deletion
-                    $files = new RecursiveIteratorIterator(
-                        new RecursiveDirectoryIterator($fullPath, RecursiveDirectoryIterator::SKIP_DOTS),
-                        RecursiveIteratorIterator::CHILD_FIRST
-                    );
-                    foreach ($files as $fileinfo) {
-                        $todo = ($fileinfo->isDir() ? 'rmdir' : 'unlink');
-                        $todo($fileinfo->getRealPath());
+                    // Borrado recursivo robusto usando comando del sistema para asegurar que se borre todo el contenido
+                    shell_exec("rm -rf " . escapeshellarg($fullPath));
+                    if (is_dir($fullPath)) {
+                        throw new Exception("No se pudo eliminar el directorio. Verifique los permisos.");
                     }
-                    rmdir($fullPath);
                 } else {
-                    unlink($fullPath);
+                    if (!@unlink($fullPath)) {
+                        throw new Exception("No se pudo eliminar el archivo.");
+                    }
                 }
                 echo json_encode(['success' => true]);
                 break;
