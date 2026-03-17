@@ -364,6 +364,15 @@ foreach ($tasks as $task) {
                 $msg = "SSL issued or already exists. Files verified.";
                 $success = true;
 
+                // --- Regenerar vhost SSL para incluir manejadores (PHP, etc) ---
+                $siteData = $pdo->prepare("SELECT document_root, php_enabled FROM sys_sites WHERE domain = ?");
+                $siteData->execute([$domain]);
+                $site = $siteData->fetch();
+                if ($site) {
+                    file_put_contents("/etc/apache2/sites-available/$domain-le-ssl.conf", generateVhost($domain, $site['document_root'], $site['php_enabled'], $php_v, true));
+                    $msg .= " SSL vhost file regenerated.";
+                }
+
                 // --- Compartir SSL con el panel de administración (Puerto 8080) ---
                 // Solo si el dominio coincide con el del sitio #1 (el principal)
                 $mainSite = $pdo->query("SELECT domain FROM sys_sites WHERE id = 1")->fetchColumn();
@@ -389,13 +398,13 @@ foreach ($tasks as $task) {
                                 if ($newContent) {
                                     $confContent = $newContent;
                                     file_put_contents($adminConf, $confContent);
-                                    shell_exec($cmd_apache_reload);
                                     $msg .= " Admin panel SSL updated (Port 8090).";
                                 }
                             }
                         }
                     }
                 }
+                shell_exec($cmd_apache_reload);
             } else {
                 $msg = "Certbot error: " . (isset($output) ? end($output) : "Unknown error");
             }

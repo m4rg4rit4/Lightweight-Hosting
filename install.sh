@@ -164,7 +164,7 @@ printf "${YELLOW}Instalando PHP-FPM y extensiones necesarias...${NC}\n"
 apt install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip php-bcmath php-intl || { printf "${RED}Error al instalar PHP.${NC}\n"; exit 1; }
 
 # Detección robusta de la versión de PHP instalada
-PHP_VERSION=$(ls /etc/php/ | grep -E '^[0-9.]+$' | head -n 1)
+PHP_VERSION=$(ls /etc/php/ | grep -E '^[0-9.]+$' | sort -V | tail -n 1)
 
 if [ -z "$PHP_VERSION" ]; then
     printf "${RED}No se detectó ninguna versión de PHP instalada en /etc/php/.${NC}\n"
@@ -551,7 +551,7 @@ fi
 # Crear VirtualHost para el puerto 8080 (Admin + PHPMyAdmin)
 # Detección robusta del socket de PHP
 # En Debian 13, php-fpm-socket-helper suele crear /run/php/php-fpm.sock
-REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1)
+REAL_PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | sort -V | tail -n 1)
 if [ -z "$REAL_PHP_SOCKET" ]; then
     # Fallback 1: El socket genérico de Debian 13
     if [ -S "/run/php/php-fpm.sock" ]; then
