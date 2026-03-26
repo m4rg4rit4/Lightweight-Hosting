@@ -16,7 +16,7 @@ printf "${GREEN}Iniciando instalación ultra-ligera del sistema de hosting...${N
 
 # Detección de flag /update para instalación no interactiva
 AUTO_UPDATE=false
-if [[ "$*" == *"/update"* ]]; then
+if echo "$*" | grep -q "/update"; then
     AUTO_UPDATE=true
     printf "${YELLOW}Modo NO INTERACTIVO activado (/update)${NC}\n"
 fi
@@ -25,7 +25,7 @@ fi
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION="1.1.1"
+    VERSION="1.1.7"
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
@@ -33,7 +33,7 @@ printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 rm -f /etc/apt/apt.conf.d/01lean /etc/dpkg/dpkg.cfg.d/01lean
 
 # 1. Verificación de usuario root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$(id -u)" -ne 0 ]; then 
     printf "${RED}Por favor, ejecuta como root${NC}\n"
     exit 1
 fi
