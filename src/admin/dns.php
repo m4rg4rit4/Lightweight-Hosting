@@ -19,8 +19,9 @@ if (!empty($servers)) {
 }
 
 // Helper genérico para peticiones cURL a la API DNS
-function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
-    global $baseUrl;
+// Helper genérico para peticiones cURL a una API DNS específica
+function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = null) {
+    $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
     $url = $baseUrl . $endpoint;
     
     $ch = curl_init($url);
@@ -53,6 +54,13 @@ function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
         'response' => $response,
         'error' => $error
     ];
+}
+
+// Wrapper para mantener compatibilidad, usa el primer servidor como principal
+function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
+    global $servers;
+    if (empty($servers)) return ['code' => 500, 'error' => 'No DNS servers configured.'];
+    return dnsApiRequestOnServer($servers[0], $endpoint, $method, $data);
 }
 
 // Lógica de agrupación jerárquica
@@ -215,16 +223,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'id' => (int)$_POST['record_id']
         ]);
         
-        if ($res['code'] === 200) {
-            $msg = "Registro borrado correctamente.";
-            $msg_type = 'success';
-        } else {
-            $errData = @json_decode($res['response'], true);
-            $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
-            if (empty($errData['message']) && !empty($res['response'])) {
-                $detail .= " | " . substr(strip_tags($res['response']), 0, 150);
+            if ($res['code'] === 200) {
+                $msg = "Registro borrado correctamente.";
+                $msg_type = 'success';
+            } else {
+                $errData = @json_decode($res['response'], true);
+                $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
+                if (empty($errData['message']) && !empty($res['response'])) {
+                    $detail .= " | " . substr(strip_tags($res['response']), 0, 150);
+                }
+                $msg = "Error al borrar el registro: " . $detail;
             }
-            $msg = "Error al borrar el registro: " . $detail;
+        }
+        elseif ($action === 'sync_dns') {
+            $scope = $_POST['scope'] ?? 'all';
+            $domain = $_POST['domain'] ?? '';
+            $source = $servers[0];
+            $count = 0;
+            
+            foreach ($servers as $idx => $sUrl) {
+                if ($idx === 0) continue;
+                
+                if ($scope === 'all') {
+                    // Sync all zones (missing ones)
+                    $resS = dnsApiRequestOnServer($source, '/api-dns/zones', 'GET');
+                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
+                    if ($resS['code'] === 200 && $resT['code'] === 200) {
+                        $zSData = json_decode($resS['response'], true);
+                        $zS = $zSData['zones'] ?? $zSData['data'] ?? [];
+                        $zTData = json_decode($resT['response'], true);
+                        $zT = $zTData['zones'] ?? $zTData['data'] ?? [];
+                        
+                        $zSNames = (!empty($zS) && isset($zS[0]['domain'])) ? array_column($zS, 'domain') : $zS;
+                        $zTNames = (!empty($zT) && isset($zT[0]['domain'])) ? array_column($zT, 'domain') : $zT;
+                        
+                        foreach ($zSNames as $z) {
+                            if (!in_array($z, $zTNames)) {
+                                dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', ['domain' => $z, 'ip' => '']);
+                                $count++;
+                            }
+                        }
+                    }
+                } elseif ($scope === 'domain' && !empty($domain)) {
+                    // Sync records for active domain
+                    $resS = dnsApiRequestOnServer($source, '/api-dns/records/' . urlencode($domain), 'GET');
+                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($domain), 'GET');
+                    if ($resS['code'] === 200 && $resT['code'] === 200) {
+                        $rS = json_decode($resS['response'], true)['records'] ?? [];
+                        $rT = json_decode($resT['response'], true)['records'] ?? [];
+                        $tHashes = array_map(function($r){ return strtolower($r['name']).'|'.$r['type'].'|'.$r['content']; }, $rT);
+                        
+                        foreach ($rS as $rs) {
+                            $h = strtolower($rs['name']).'|'.$rs['type'].'|'.$rs['content'];
+                            if (!in_array($h, $tHashes)) {
+                                dnsApiRequestOnServer($sUrl, '/api-dns/record/add', 'POST', [
+                                    'domain' => $domain,
+                                    'name' => $rs['name'],
+                                    'type' => $rs['type'],
+                                    'content' => $rs['content'],
+                                    'ttl' => $rs['ttl'],
+                                    'priority' => $rs['priority'] ?? null
+                                ]);
+                                $count++;
+                            }
+                        }
+                    }
+                }
+            }
+            $msg = "Sincronización completada. $count cambios aplicados en servidores secundarios.";
+            $msg_type = 'success';
         }
     }
     
@@ -269,6 +336,28 @@ if ($resZones['code'] === 200) {
     }
 }
 
+// Verificación de sincronización
+$syncInfo = ['needed' => false, 'messages' => []];
+if (count($servers) > 1) {
+    foreach ($servers as $idx => $sUrl) {
+        if ($idx === 0) continue;
+        $resOther = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
+        if ($resOther['code'] !== 200) {
+            $syncInfo['needed'] = true;
+            $syncInfo['messages'][] = "Servidor " . parse_url($sUrl, PHP_URL_HOST) . " inaccesible.";
+            continue;
+        }
+        $dataOther = json_decode($resOther['response'], true);
+        $zORaw = $dataOther['zones'] ?? $dataOther['data'] ?? [];
+        $zO = (!empty($zORaw) && isset($zORaw[0]['domain'])) ? array_column($zORaw, 'domain') : $zORaw;
+        if (count($apiZones) !== count($zO) || !empty(array_diff($apiZones, $zO)) || !empty(array_diff($zO, $apiZones))) {
+            $syncInfo['needed'] = true;
+            $syncInfo['messages'][] = "Diferencias en el listado de zonas globales.";
+            break;
+        }
+    }
+}
+
 // Combinar y agrupar
 $allDomains = array_unique(array_merge($localSites, $apiZones));
 $hierarchy = getDomainHierarchy($allDomains);
@@ -278,8 +367,32 @@ if ($activeDomain) {
     $res = dnsApiRequest('/api-dns/records/' . urlencode($activeDomain), 'GET');
     if ($res['code'] === 200) {
         $data = json_decode($res['response'], true);
-        if ($data['success']) {
+        if ($data['success'] ?? false) {
             $records = $data['records'] ?? [];
+            
+            // Verificación de registros si hay dominio activo y múltiples servidores
+            if (!$syncInfo['needed'] && count($servers) > 1 && !empty($records)) {
+                foreach ($servers as $idx => $sUrl) {
+                    if ($idx === 0) continue;
+                    $resOtherR = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($activeDomain), 'GET');
+                    if ($resOtherR['code'] !== 200) {
+                        $syncInfo['needed'] = true;
+                        $syncInfo['messages'][] = "Error al verificar registros de $activeDomain en " . parse_url($sUrl, PHP_URL_HOST);
+                        break;
+                    }
+                    $rOtherData = json_decode($resOtherR['response'], true);
+                    $rOther = $rOtherData['records'] ?? [];
+                    $mH = array_map(function($r){ return strtolower($r['name']).'|'.$r['type'].'|'.$r['content']; }, $records);
+                    $oH = array_map(function($r){ return strtolower($r['name']).'|'.$r['type'].'|'.$r['content']; }, $rOther);
+                    if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH))) {
+                        $syncInfo['needed'] = true;
+                        if (!in_array("Registros de $activeDomain desincronizados.", $syncInfo['messages'])) {
+                            $syncInfo['messages'][] = "Registros de $activeDomain desincronizados.";
+                        }
+                        break;
+                    }
+                }
+            }
         } else {
             $apiError = $data['message'] ?? "Error desconocido en API";
         }
@@ -323,6 +436,24 @@ if ($activeDomain && isset($_GET['export'])) {
 <body>
     <div class="container" style="max-width: 1240px;">
         <?php include 'header.php'; ?>
+
+        <?php if ($syncInfo['needed']): ?>
+             <div class="alert alert-warning" style="display: flex; justify-content: space-between; align-items: center; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #d97706; padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; backdrop-filter: blur(10px);">
+                 <div style="display: flex; align-items: center; gap: 12px;">
+                     <div style="font-size: 1.5rem; background: #f59e0b; color: #fff; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);">⚠️</div>
+                     <div>
+                         <strong style="display: block; font-size: 1rem;">Sincronización de DNS Requerida</strong>
+                         <span style="font-size: 0.85rem; opacity: 0.8;"><?php echo implode(' ', $syncInfo['messages']); ?></span>
+                     </div>
+                 </div>
+                 <form method="POST" style="margin: 0;">
+                     <input type="hidden" name="action" value="sync_dns">
+                     <input type="hidden" name="scope" value="<?php echo $activeDomain ? 'domain' : 'all'; ?>">
+                     <input type="hidden" name="domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
+                     <button type="submit" class="btn btn-warning" style="background: #f59e0b; color: white; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 15px rgba(245, 158, 11, 0.3)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(245, 158, 11, 0.2)'">Sincronizar ahora</button>
+                 </form>
+             </div>
+        <?php endif; ?>
 
         <?php if ($msg): ?>
             <div class='alert alert-<?php echo $msg_type; ?>'><?php echo htmlspecialchars($msg); ?></div>
