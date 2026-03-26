@@ -403,8 +403,45 @@ foreach ($tasks as $task) {
                     }
                 }
                 shell_exec($cmd_apache_reload);
+            }
+            break;
+
+        case 'SSL_ISSUE_WILDCARD':
+            $email = defined('LETSENCRYPT_EMAIL') ? LETSENCRYPT_EMAIL : (defined('ADMIN_EMAIL') ? ADMIN_EMAIL : 'admin@' . $domain);
+            
+            // Rutas a los hooks
+            $authHook = "/var/www/admin_panel/src/engine/certbot_dns_auth.php";
+            $cleanupHook = "/var/www/admin_panel/src/engine/certbot_dns_cleanup.php";
+            
+            if (!file_exists($authHook) || !file_exists($cleanupHook)) {
+                $msg = "Error: Hooks de DNS no encontrados ($authHook).";
+                break;
+            }
+
+            // Comando certbot para Wildcard vía DNS-01
+            $cmd = "$cmd_certbot certonly --manual --preferred-challenges dns " .
+                   "--manual-auth-hook " . escapeshellarg($authHook) . " " .
+                   "--manual-cleanup-hook " . escapeshellarg($cleanupHook) . " " .
+                   "-d " . escapeshellarg($domain) . " -d " . escapeshellarg("*.$domain") . " " .
+                   "--non-interactive --agree-tos --email " . escapeshellarg($email) . " --manual-public-ip-logging-ok --keep-until-expiring 2>&1";
+            
+            exec($cmd, $output, $resultCode);
+
+            if (file_exists("/etc/letsencrypt/live/$domain/fullchain.pem")) {
+                $pdo->prepare("UPDATE sys_sites SET ssl_enabled = 1 WHERE domain = ?")->execute([$domain]);
+                $msg = "Wildcard SSL issued successfully via DNS-01.";
+                $success = true;
+                
+                // Regenerar vhost SSL
+                $siteData = $pdo->prepare("SELECT document_root, php_enabled FROM sys_sites WHERE domain = ?");
+                $siteData->execute([$domain]);
+                $site = $siteData->fetch();
+                if ($site) {
+                    file_put_contents("/etc/apache2/sites-available/$domain-le-ssl.conf", generateVhost($domain, $site['document_root'], $site['php_enabled'], $php_v, true));
+                }
+                shell_exec($cmd_apache_reload);
             } else {
-                $msg = "Certbot error: " . (isset($output) ? end($output) : "Unknown error");
+                $msg = "Certbot Wildcard Error: " . (isset($output) ? end($output) : "Unknown error");
             }
             break;
 

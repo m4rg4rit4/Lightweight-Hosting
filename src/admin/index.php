@@ -76,6 +76,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 case 'toggle_ssl':
                     $taskType = 'SSL_LETSENCRYPT';
                     break;
+                case 'toggle_ssl_wildcard':
+                    $taskType = 'SSL_ISSUE_WILDCARD';
+                    break;
                 case 'delete':
                     if ($siteId == 1) {
                         $msg = "El sitio principal no puede ser eliminado.";
@@ -279,17 +282,37 @@ if (defined('DNS_TOKEN') && !empty(DNS_TOKEN)) {
                         </form>
                     </td>
                     <td>
-                        <form method="POST" style="display:inline;">
-                            <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
-                            <input type="hidden" name="action" value="toggle_ssl">
-                            <button type="submit" class="btn btn-outline btn-sm" <?php echo ($s['status'] !== 'active' || $s['is_processing'] > 0) ? 'disabled' : ''; ?>>
-                                <?php if ($s['ssl_enabled'] == 1): ?>
-                                    <span style="color: var(--success);">🔒</span> Protegido
-                                <?php else: ?>
-                                    <span style="color: var(--text-dim);">🔓</span> Sin SSL
-                                <?php endif; ?>
-                            </button>
-                        </form>
+                        <?php 
+                        $isManaged = false;
+                        foreach ($apiZones as $z) {
+                            if ($s['domain'] === $z || str_ends_with($s['domain'], '.' . $z)) {
+                                $isManaged = true;
+                                break;
+                            }
+                        }
+                        ?>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
+                                <input type="hidden" name="action" value="toggle_ssl">
+                                <button type="submit" class="btn btn-outline btn-sm" style="width: 100%; text-align: left;" <?php echo ($s['status'] !== 'active' || $s['is_processing'] > 0) ? 'disabled' : ''; ?>>
+                                    <?php if ($s['ssl_enabled'] == 1): ?>
+                                        <span style="color: var(--success);">🔒</span> Estándar
+                                    <?php else: ?>
+                                        <span style="color: var(--text-dim);">🔓</span> Sin SSL
+                                    <?php endif; ?>
+                                </button>
+                            </form>
+                            <?php if ($isManaged): ?>
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
+                                <input type="hidden" name="action" value="toggle_ssl_wildcard">
+                                <button type="submit" class="btn btn-outline btn-sm" style="width: 100%; text-align: left;" <?php echo ($s['status'] !== 'active' || $s['is_processing'] > 0) ? 'disabled' : ''; ?>>
+                                    <span style="color: var(--info);">✨</span> Wildcard (*.)
+                                </button>
+                            </form>
+                            <?php endif; ?>
+                        </div>
                     </td>
                     <td>
                         <?php if ($s['is_processing'] > 0): ?>
