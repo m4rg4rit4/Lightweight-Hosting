@@ -258,46 +258,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($servers as $idx => $sUrl) {
                 if ($idx === 0) continue;
                 
+                // Obtener zonas de ambos
+                $resS = dnsApiRequestOnServer($source, '/api-dns/zones', 'GET');
+                $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
+                if ($resS['code'] !== 200 || $resT['code'] !== 200) continue;
+
+                $zSData = json_decode($resS['response'], true);
+                $zS = (array)($zSData['zones'] ?? $zSData['data'] ?? []);
+                $zTData = json_decode($resT['response'], true);
+                $zT = (array)($zTData['zones'] ?? $zTData['data'] ?? []);
+                
+                $zSNames = (!empty($zS) && isset($zS[0]['domain'])) ? (array)array_column($zS, 'domain') : (array)$zS;
+                $zTNames = (!empty($zT) && isset($zT[0]['domain'])) ? (array)array_column($zT, 'domain') : (array)$zT;
+
                 if ($scope === 'all') {
-                    // Sync all zones (missing ones)
-                    $resS = dnsApiRequestOnServer($source, '/api-dns/zones', 'GET');
-                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
-                    if ($resS['code'] === 200 && $resT['code'] === 200) {
-                        $zSData = json_decode($resS['response'], true);
-                        $zS = (array)($zSData['zones'] ?? $zSData['data'] ?? []);
-                        $zTData = json_decode($resT['response'], true);
-                        $zT = (array)($zTData['zones'] ?? $zTData['data'] ?? []);
-                        
-                        $zSNames = (!empty($zS) && isset($zS[0]['domain'])) ? (array)array_column($zS, 'domain') : (array)$zS;
-                        $zTNames = (!empty($zT) && isset($zT[0]['domain'])) ? (array)array_column($zT, 'domain') : (array)$zT;
-                        
-                        foreach ($zSNames as $z) {
-                            if (!in_array($z, $zTNames)) {
-                                $rA = dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', ['domain' => $z, 'ip' => '']);
-                                if ($rA['code'] === 200) $count++;
+                    // Sincronizar Zonas faltantes
+                    foreach ($zSNames as $z) {
+                        if (!in_array($z, $zTNames)) {
+                            // Intentar encontrar una IP razonable para la zona de origen
+                            $targetIp = '';
+                            $resRecs = dnsApiRequestOnServer($source, '/api-dns/records/' . urlencode($z), 'GET');
+                            if ($resRecs['code'] === 200) {
+                                $recs = json_decode($resRecs['response'], true)['records'] ?? [];
+                                foreach ($recs as $r) {
+                                    if ($r['name'] === '@' && $r['type'] === 'A') {
+                                        $targetIp = $r['content'];
+                                        break;
+                                    }
+                                }
                             }
+                            $rA = dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', ['domain' => $z, 'ip' => $targetIp]);
+                            if ($rA['code'] === 200) $count++;
                         }
                     }
-                } elseif ($scope === 'domain' && !empty($domain)) {
-                    // Sync records for active domain
-                    $resS = dnsApiRequestOnServer($source, '/api-dns/records/' . urlencode($domain), 'GET');
-                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($domain), 'GET');
-                    if ($resS['code'] === 200 && $resT['code'] === 200) {
-                        $rS = (array)(json_decode($resS['response'], true)['records'] ?? []);
-                        $rT = (array)(json_decode($resT['response'], true)['records'] ?? []);
+                    // Después de añadir zonas, refrescar lista de T para sincronizar registros
+                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
+                    $zTData = json_decode($resT['response'], true);
+                    $zTNames = array_column($zTData['zones'] ?? [], 'domain');
+                }
+
+                // Sincronizar registros de dominios desincronizados
+                $domainsToSync = ($scope === 'domain' && !empty($domain)) ? [$domain] : $zSNames;
+                foreach ($domainsToSync as $d) {
+                    if (!in_array($d, $zTNames)) continue;
+
+                    $resRS = dnsApiRequestOnServer($source, '/api-dns/records/' . urlencode($d), 'GET');
+                    $resRT = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($d), 'GET');
+                    if ($resRS['code'] === 200 && $resRT['code'] === 200) {
+                        $rS = (array)(json_decode($resRS['response'], true)['records'] ?? []);
+                        $rT = (array)(json_decode($resRT['response'], true)['records'] ?? []);
                         
-                        // Generar comparador basado en los campos clave del registro
                         $tHashes = array_map(function($r){ 
                             return strtolower(trim($r['name'] ?? '@')).'|'.strtoupper(trim($r['type'] ?? '')).'|'.trim($r['content'] ?? ''); 
                         }, $rT);
                         
                         foreach ($rS as $rs) {
-                            if (($rs['type'] ?? '') === 'SOA') continue; // No sincronizar SOA, cada servidor tiene su serial
+                            if (($rs['type'] ?? '') === 'SOA' || ($rs['type'] ?? '') === 'NS') continue; 
                             
                             $h = strtolower(trim($rs['name'] ?? '@')).'|'.strtoupper(trim($rs['type'] ?? '')).'|'.trim($rs['content'] ?? '');
                             if (!in_array($h, $tHashes)) {
                                 $rA = dnsApiRequestOnServer($sUrl, '/api-dns/record/add', 'POST', [
-                                    'domain' => $domain,
+                                    'domain' => $d,
                                     'name' => $rs['name'],
                                     'type' => $rs['type'],
                                     'content' => $rs['content'],
