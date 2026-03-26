@@ -59,3 +59,31 @@ function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = n
     
     return ['code' => $httpCode, 'response' => $response];
 }
+
+// Alias para compatibilidad
+if (!function_exists('dnsApiRequestOnServerSimplified')) {
+    function dnsApiRequestOnServerSimplified($s, $e, $m = 'GET', $d = null) {
+        return dnsApiRequestOnServer($s, $e, $m, $d);
+    }
+}
+
+/**
+ * Realiza una petición a todos los servidores DNS configurados (para POST/PUT/DELETE)
+ * o solo al primero (para GET).
+ */
+function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
+    if (!defined('DNS_TOKEN') || !defined('DNS_SERVER')) return ['code' => 0, 'response' => ''];
+    $servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
+    if (empty($servers)) return ['code' => 0, 'response' => ''];
+    
+    if ($method === 'GET') {
+        return dnsApiRequestOnServer($servers[0], $endpoint, $method, $data);
+    }
+    
+    $mainRes = null;
+    foreach ($servers as $idx => $sUrl) {
+        $res = dnsApiRequestOnServer($sUrl, $endpoint, $method, $data);
+        if ($idx === 0) $mainRes = $res;
+    }
+    return $mainRes;
+}
