@@ -110,7 +110,20 @@ function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
     $servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
     if (empty($servers)) return ['code' => 0, 'response' => ''];
     
-    $baseUrl = (strpos($servers[0], 'http') === 0) ? rtrim($servers[0], '/') : "http://" . rtrim($servers[0], '/');
+    if ($method === 'GET') {
+        return dnsApiRequestOnServerSimplified($servers[0], $endpoint, $method, $data);
+    }
+    
+    $mainRes = null;
+    foreach ($servers as $idx => $sUrl) {
+        $res = dnsApiRequestOnServerSimplified($sUrl, $endpoint, $method, $data);
+        if ($idx === 0) $mainRes = $res;
+    }
+    return $mainRes;
+}
+
+function dnsApiRequestOnServerSimplified($serverUrl, $endpoint, $method, $data) {
+    $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
     $url = $baseUrl . $endpoint;
     
     $ch = curl_init($url);
@@ -128,6 +141,7 @@ function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    
     return ['code' => $httpCode, 'response' => $response];
 }
 

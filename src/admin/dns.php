@@ -57,10 +57,24 @@ function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = n
 }
 
 // Wrapper para mantener compatibilidad, usa el primer servidor como principal
+// Wrapper para mantener compatibilidad y realizar replicación en mutaciones (POST)
 function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
     global $servers;
     if (empty($servers)) return ['code' => 500, 'error' => 'No DNS servers configured.'];
-    return dnsApiRequestOnServer($servers[0], $endpoint, $method, $data);
+    
+    if ($method === 'GET') {
+        return dnsApiRequestOnServer($servers[0], $endpoint, $method, $data);
+    }
+    
+    // Para POST, intentamos replicar en todos los servidores configurados
+    $mainRes = null;
+    foreach ($servers as $idx => $sUrl) {
+        $res = dnsApiRequestOnServer($sUrl, $endpoint, $method, $data);
+        if ($idx === 0) {
+            $mainRes = $res;
+        }
+    }
+    return $mainRes;
 }
 
 // Lógica de agrupación jerárquica
@@ -259,8 +273,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         
                         foreach ($zSNames as $z) {
                             if (!in_array($z, $zTNames)) {
-                                dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', ['domain' => $z, 'ip' => '']);
-                                $count++;
+                                $rA = dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', ['domain' => $z, 'ip' => '']);
+                                if ($rA['code'] === 200) $count++;
                             }
                         }
                     }
@@ -271,12 +285,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($resS['code'] === 200 && $resT['code'] === 200) {
                         $rS = (array)(json_decode($resS['response'], true)['records'] ?? []);
                         $rT = (array)(json_decode($resT['response'], true)['records'] ?? []);
-                        $tHashes = array_map(function($r){ return strtolower($r['name'] ?? '').'|'.($r['type'] ?? '').'|'.($r['content'] ?? ''); }, $rT);
+                        
+                        // Generar comparador basado en los campos clave del registro
+                        $tHashes = array_map(function($r){ 
+                            return strtolower(trim($r['name'] ?? '@')).'|'.strtoupper(trim($r['type'] ?? '')).'|'.trim($r['content'] ?? ''); 
+                        }, $rT);
                         
                         foreach ($rS as $rs) {
-                            $h = strtolower($rs['name'] ?? '').'|'.($rs['type'] ?? '').'|'.($rs['content'] ?? '');
+                            if (($rs['type'] ?? '') === 'SOA') continue; // No sincronizar SOA, cada servidor tiene su serial
+                            
+                            $h = strtolower(trim($rs['name'] ?? '@')).'|'.strtoupper(trim($rs['type'] ?? '')).'|'.trim($rs['content'] ?? '');
                             if (!in_array($h, $tHashes)) {
-                                dnsApiRequestOnServer($sUrl, '/api-dns/record/add', 'POST', [
+                                $rA = dnsApiRequestOnServer($sUrl, '/api-dns/record/add', 'POST', [
                                     'domain' => $domain,
                                     'name' => $rs['name'],
                                     'type' => $rs['type'],
@@ -284,7 +304,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'ttl' => $rs['ttl'],
                                     'priority' => $rs['priority'] ?? null
                                 ]);
-                                $count++;
+                                if ($rA['code'] === 200) $count++;
                             }
                         }
                     }

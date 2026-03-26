@@ -83,7 +83,6 @@ function syncDnsRecord($action, $domain) {
             curl_setopt($chAdd, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
             curl_exec($chAdd);
             curl_close($chAdd);
-            break;
         }
 
         if ($httpCode === 200 && $res) {
@@ -131,7 +130,6 @@ function syncDnsRecord($action, $domain) {
                         }
                     }
                 }
-                break;
             }
         }
     }

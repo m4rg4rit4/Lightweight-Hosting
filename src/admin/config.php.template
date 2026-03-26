@@ -11,6 +11,10 @@ define('DB_MANAGER_DIR', '{{DB_MANAGER_DIR}}');
 define('SYSTEM_VERSION', '{{VERSION}}');
 define('HOSTING_INSTALLED', 'true');
 
+// Configuración DNS (Opcional, para múltiples servidores DNS)
+// define('DNS_TOKEN', '{{DNS_TOKEN}}');
+// define('DNS_SERVER', 'http://dns1.example.com:8080,http://dns2.example.com:8080');
+
 function getPDO() {
     static $pdo;
     if (!$pdo) {
