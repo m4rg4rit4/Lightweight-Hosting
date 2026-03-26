@@ -250,12 +250,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
                     if ($resS['code'] === 200 && $resT['code'] === 200) {
                         $zSData = json_decode($resS['response'], true);
-                        $zS = $zSData['zones'] ?? $zSData['data'] ?? [];
+                        $zS = (array)($zSData['zones'] ?? $zSData['data'] ?? []);
                         $zTData = json_decode($resT['response'], true);
-                        $zT = $zTData['zones'] ?? $zTData['data'] ?? [];
+                        $zT = (array)($zTData['zones'] ?? $zTData['data'] ?? []);
                         
-                        $zSNames = (!empty($zS) && isset($zS[0]['domain'])) ? array_column($zS, 'domain') : $zS;
-                        $zTNames = (!empty($zT) && isset($zT[0]['domain'])) ? array_column($zT, 'domain') : $zT;
+                        $zSNames = (!empty($zS) && isset($zS[0]['domain'])) ? (array)array_column($zS, 'domain') : (array)$zS;
+                        $zTNames = (!empty($zT) && isset($zT[0]['domain'])) ? (array)array_column($zT, 'domain') : (array)$zT;
                         
                         foreach ($zSNames as $z) {
                             if (!in_array($z, $zTNames)) {
@@ -269,12 +269,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $resS = dnsApiRequestOnServer($source, '/api-dns/records/' . urlencode($domain), 'GET');
                     $resT = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($domain), 'GET');
                     if ($resS['code'] === 200 && $resT['code'] === 200) {
-                        $rS = json_decode($resS['response'], true)['records'] ?? [];
-                        $rT = json_decode($resT['response'], true)['records'] ?? [];
-                        $tHashes = array_map(function($r){ return strtolower($r['name']).'|'.$r['type'].'|'.$r['content']; }, $rT);
+                        $rS = (array)(json_decode($resS['response'], true)['records'] ?? []);
+                        $rT = (array)(json_decode($resT['response'], true)['records'] ?? []);
+                        $tHashes = array_map(function($r){ return strtolower($r['name'] ?? '').'|'.($r['type'] ?? '').'|'.($r['content'] ?? ''); }, $rT);
                         
                         foreach ($rS as $rs) {
-                            $h = strtolower($rs['name']).'|'.$rs['type'].'|'.$rs['content'];
+                            $h = strtolower($rs['name'] ?? '').'|'.($rs['type'] ?? '').'|'.($rs['content'] ?? '');
                             if (!in_array($h, $tHashes)) {
                                 dnsApiRequestOnServer($sUrl, '/api-dns/record/add', 'POST', [
                                     'domain' => $domain,
@@ -290,17 +290,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
             }
+
             $msg = "Sincronización completada. $count cambios aplicados en servidores secundarios.";
             $msg_type = 'success';
         }
+
+        $_SESSION['flash_msg'] = $msg;
+        $_SESSION['flash_type'] = $msg_type;
+        
+        header("Location: " . $_SERVER['PHP_SELF'] . ($domain_to_redirect ? "?domain=" . urlencode($domain_to_redirect) : ''));
+        exit;
     }
-    
-    $_SESSION['flash_msg'] = $msg;
-    $_SESSION['flash_type'] = $msg_type;
-    
-    header("Location: " . $_SERVER['PHP_SELF'] . ($domain_to_redirect ? "?domain=" . urlencode($domain_to_redirect) : ''));
-    exit;
-}
 
 // ---------------------------------------------------------
 // Modo Lectura GET
@@ -381,10 +381,10 @@ if ($activeDomain) {
                         break;
                     }
                     $rOtherData = json_decode($resOtherR['response'], true);
-                    $rOther = $rOtherData['records'] ?? [];
-                    $mH = array_map(function($r){ return strtolower($r['name']).'|'.$r['type'].'|'.$r['content']; }, $records);
-                    $oH = array_map(function($r){ return strtolower($r['name']).'|'.$r['type'].'|'.$r['content']; }, $rOther);
-                    if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH))) {
+                    $rOther = (array)($rOtherData['records'] ?? []);
+                    $mH = array_map(function($r){ return strtolower($r['name'] ?? '').'|'.($r['type'] ?? '').'|'.($r['content'] ?? ''); }, (array)$records);
+                    $oH = array_map(function($r){ return strtolower($r['name'] ?? '').'|'.($r['type'] ?? '').'|'.($r['content'] ?? ''); }, (array)$rOther);
+                    if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
                         $syncInfo['needed'] = true;
                         if (!in_array("Registros de $activeDomain desincronizados.", $syncInfo['messages'])) {
                             $syncInfo['messages'][] = "Registros de $activeDomain desincronizados.";
