@@ -413,6 +413,13 @@ if ($activeDomain) {
             
             // Verificación de registros si hay dominio activo y múltiples servidores
             if (!$syncInfo['needed'] && count($servers) > 1 && !empty($records)) {
+                // Generar hashes de registros del servidor principal (excluyendo SOA/NS por ser locales)
+                $mH = [];
+                foreach ((array)$records as $r) {
+                    if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
+                    $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                }
+
                 foreach ($servers as $idx => $sUrl) {
                     if ($idx === 0) continue;
                     $resOtherR = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($activeDomain), 'GET');
@@ -423,8 +430,13 @@ if ($activeDomain) {
                     }
                     $rOtherData = json_decode($resOtherR['response'], true);
                     $rOther = (array)($rOtherData['records'] ?? []);
-                    $mH = array_map(function($r){ return strtolower($r['name'] ?? '').'|'.($r['type'] ?? '').'|'.($r['content'] ?? ''); }, (array)$records);
-                    $oH = array_map(function($r){ return strtolower($r['name'] ?? '').'|'.($r['type'] ?? '').'|'.($r['content'] ?? ''); }, (array)$rOther);
+                    
+                    $oH = [];
+                    foreach ($rOther as $r) {
+                        if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
+                        $oH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                    }
+
                     if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
                         $syncInfo['needed'] = true;
                         if (!in_array("Registros de $activeDomain desincronizados.", $syncInfo['messages'])) {
