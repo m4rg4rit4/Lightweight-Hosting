@@ -16,7 +16,7 @@ function getDnsClusterHealth() {
     $errors = 0;
 
     foreach ($servers as $idx => $sUrl) {
-        $res = dnsApiRequestOnServerSimplified($sUrl, '/api-dns/zones', 'GET');
+        $res = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
         $host = parse_url($sUrl, PHP_URL_HOST);
         
         if ($res['code'] === 200) {
@@ -37,28 +37,7 @@ function getDnsClusterHealth() {
     }
 }
 
-/**
- * Realiza una petición a todos los servidores DNS configurados (para POST/PUT/DELETE)
- * o solo al primero (para GET).
- */
-function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
-    if (!defined('DNS_TOKEN') || !defined('DNS_SERVER')) return ['code' => 0, 'response' => ''];
-    $servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
-    if (empty($servers)) return ['code' => 0, 'response' => ''];
-    
-    if ($method === 'GET') {
-        return dnsApiRequestOnServerSimplified($servers[0], $endpoint, $method, $data);
-    }
-    
-    $mainRes = null;
-    foreach ($servers as $idx => $sUrl) {
-        $res = dnsApiRequestOnServerSimplified($sUrl, $endpoint, $method, $data);
-        if ($idx === 0) $mainRes = $res;
-    }
-    return $mainRes;
-}
-
-function dnsApiRequestOnServerSimplified($serverUrl, $endpoint, $method = 'GET', $data = null) {
+function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = null) {
     $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
     $url = $baseUrl . $endpoint;
     

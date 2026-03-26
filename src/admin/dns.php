@@ -19,27 +19,8 @@ if (!empty($servers)) {
     $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
 }
 
-// Wrapper para mantener compatibilidad y realizar replicación en mutaciones (POST)
-function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
-    global $servers;
-    if (empty($servers)) return ['code' => 500, 'error' => 'No DNS servers configured.'];
-    
-    if ($method === 'GET') {
-        return dnsApiRequestOnServer($servers[0], $endpoint, $method, $data);
-    }
-    
-    // Para POST, intentamos replicar en todos los servidores configurados
-    $mainRes = null;
-    foreach ($servers as $idx => $sUrl) {
-        $res = dnsApiRequestOnServer($sUrl, $endpoint, $method, $data);
-        if ($idx === 0) {
-            $mainRes = $res;
-        }
-    }
-    return $mainRes;
-}
-
 // Lógica de agrupación jerárquica
+
 function getDomainHierarchy($allDomains) {
     $hierarchy = [];
     $sortedDomains = $allDomains;
