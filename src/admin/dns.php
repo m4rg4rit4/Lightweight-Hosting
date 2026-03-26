@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'config.php';
+require_once 'dns_utils.php';
 
 // Verificación estricta de configuración DNS
 if (!defined('DNS_TOKEN') || !defined('DNS_SERVER') || empty(DNS_TOKEN) || empty(DNS_SERVER)) {
@@ -18,45 +19,6 @@ if (!empty($servers)) {
     $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
 }
 
-// Helper genérico para peticiones cURL a la API DNS
-// Helper genérico para peticiones cURL a una API DNS específica
-function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = null) {
-    $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
-    $url = $baseUrl . $endpoint;
-    
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    
-    $headers = [
-        "Authorization: Bearer " . DNS_TOKEN,
-        "Accept: application/json"
-    ];
-
-    if ($method === 'POST') {
-        curl_setopt($ch, CURLOPT_POST, true);
-        if ($data !== null) {
-            $jsonData = json_encode($data);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonData);
-            $headers[] = "Content-Type: application/json";
-        }
-    }
-
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
-    curl_close($ch);
-
-    return [
-        'code' => $httpCode,
-        'response' => $response,
-        'error' => $error
-    ];
-}
-
-// Wrapper para mantener compatibilidad, usa el primer servidor como principal
 // Wrapper para mantener compatibilidad y realizar replicación en mutaciones (POST)
 function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
     global $servers;

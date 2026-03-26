@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'config.php';
+require_once 'dns_utils.php';
 $pdo = getPDO();
 
 // Manejo de acciones POST
@@ -105,47 +106,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     header("Location: " . $_SERVER['PHP_SELF'] . (isset($_POST['domain']) ? '?new=1' : ''));
     exit;
-}
-
-// Helpers para API DNS
-function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
-    if (!defined('DNS_TOKEN') || !defined('DNS_SERVER')) return ['code' => 0, 'response' => ''];
-    $servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
-    if (empty($servers)) return ['code' => 0, 'response' => ''];
-    
-    if ($method === 'GET') {
-        return dnsApiRequestOnServerSimplified($servers[0], $endpoint, $method, $data);
-    }
-    
-    $mainRes = null;
-    foreach ($servers as $idx => $sUrl) {
-        $res = dnsApiRequestOnServerSimplified($sUrl, $endpoint, $method, $data);
-        if ($idx === 0) $mainRes = $res;
-    }
-    return $mainRes;
-}
-
-function dnsApiRequestOnServerSimplified($serverUrl, $endpoint, $method, $data) {
-    $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
-    $url = $baseUrl . $endpoint;
-    
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    $headers = ["Authorization: Bearer " . DNS_TOKEN, "Accept: application/json"];
-    if ($method === 'POST') {
-        curl_setopt($ch, CURLOPT_POST, true);
-        if ($data !== null) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-            $headers[] = "Content-Type: application/json";
-        }
-    }
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 6);
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    
-    return ['code' => $httpCode, 'response' => $response];
 }
 
 // ---------------------------------------------------------
