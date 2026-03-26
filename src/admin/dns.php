@@ -128,6 +128,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = "Zona '$newZone' añadida exitosamente.";
             $msg_type = 'success';
             $domain_to_redirect = $newZone;
+
+            // Añadir registros NS para todos los servidores configurados
+            foreach ($servers as $sUrl) {
+                $nsHost = parse_url($sUrl, PHP_URL_HOST);
+                if ($nsHost) {
+                    dnsApiRequest('/api-dns/record/add', 'POST', [
+                        'domain' => $newZone,
+                        'name' => '@',
+                        'type' => 'NS',
+                        'content' => $nsHost . '.'
+                    ]);
+                }
+            }
         } else {
             $errData = @json_decode($res['response'], true);
             $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
