@@ -1,3 +1,7 @@
+<?php 
+require_once __DIR__ . '/auth.php';
+checkAuth();
+?>
 <link rel="stylesheet" href="admin-style.css">
 <nav>
     <div style="display: flex; flex-direction: column;">

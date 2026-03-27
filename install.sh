@@ -213,6 +213,8 @@ if [ -f "$EXISTING_CONFIG" ]; then
     printf "${GREEN}Detectada instalación existente. Cargando configuración...${NC}\n"
     EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_ADMIN_USER=$(grep "'ADMIN_USER'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_ADMIN_PASS=$(grep "'ADMIN_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_DB_MANAGER=$(grep "'DB_MANAGER_DIR'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     # Extraer variables de DNS (pueden estar comentadas o no)
     EXISTING_DNS_TOKEN=$(grep "DNS_TOKEN" "$EXISTING_CONFIG" | sed -E "s/.*'DNS_TOKEN', '([^']*)'.*/\1/")
@@ -283,6 +285,8 @@ mariadb -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
 printf "${YELLOW}Creando/Actualizando base de datos de administración...${NC}\n"
 if [ "$IS_UPDATE" = false ]; then
     DB_ADMIN_PASS=$(openssl rand -base64 18)
+    ADMIN_USER="admin"
+    ADMIN_PASS=$(openssl rand -base64 12)
 fi
 
 mariadb -e "CREATE DATABASE IF NOT EXISTS dbadmin;"
@@ -397,6 +401,16 @@ TEMP_DIR=$(mktemp -d /tmp/hosting_XXXXXX)
 # Asegurar que los directorios finales existen
 mkdir -p "$ADMIN_PATH" "$ENGINE_PATH"
 
+# Prompts para Credenciales del Panel (siempre preguntar)
+printf "${YELLOW}Configuración de Credenciales del Panel${NC}\n"
+DEFAULT_USER=${EXISTING_ADMIN_USER:-"admin"}
+read -p "Introduce el USUARIO de administración [$DEFAULT_USER]: " ADMIN_USER
+ADMIN_USER=${ADMIN_USER:-$DEFAULT_USER}
+
+DEFAULT_PASS=${EXISTING_ADMIN_PASS:-$(openssl rand -base64 12)}
+read -p "Introduce la CONTRASEÑA de administración [$DEFAULT_PASS]: " ADMIN_PASS
+ADMIN_PASS=${ADMIN_PASS:-$DEFAULT_PASS}
+
 # Definir URL base para archivos raw
 REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
 
@@ -411,6 +425,8 @@ curl -sSL "$REPO_RAW/src/admin/header.php" -o "$TEMP_DIR/header.php"
 curl -sSL "$REPO_RAW/src/admin/dns.php" -o "$TEMP_DIR/dns.php"
 curl -sSL "$REPO_RAW/src/admin/dns_utils.php" -o "$TEMP_DIR/dns_utils.php"
 curl -sSL "$REPO_RAW/src/admin/dns_servers.php" -o "$TEMP_DIR/dns_servers.php"
+curl -sSL "$REPO_RAW/src/admin/auth.php" -o "$TEMP_DIR/auth.php"
+curl -sSL "$REPO_RAW/src/admin/login.php" -o "$TEMP_DIR/login.php"
 curl -sSL "$REPO_RAW/src/admin/admin-style.css" -o "$TEMP_DIR/admin-style.css"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
@@ -438,6 +454,8 @@ cp "$TEMP_DIR/header.php" "$ADMIN_PATH/header.php"
 cp "$TEMP_DIR/dns.php" "$ADMIN_PATH/dns.php"
 cp "$TEMP_DIR/dns_utils.php" "$ADMIN_PATH/dns_utils.php"
 cp "$TEMP_DIR/dns_servers.php" "$ADMIN_PATH/dns_servers.php"
+cp "$TEMP_DIR/auth.php" "$ADMIN_PATH/auth.php"
+cp "$TEMP_DIR/login.php" "$ADMIN_PATH/login.php"
 cp "$TEMP_DIR/admin-style.css" "$ADMIN_PATH/admin-style.css"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
@@ -496,6 +514,8 @@ define('DB_NAME', 'dbadmin');
 define('DB_USER', 'dbadmin');
 define('DB_PASS', '$DB_ADMIN_PASS');
 define('ADMIN_EMAIL', '$ADMIN_EMAIL');
+define('ADMIN_USER', '$ADMIN_USER');
+define('ADMIN_PASS', '$ADMIN_PASS');
 define('DNS_HOSTNAME', '$DNS_HOSTNAME');
 define('DNS_DOMAIN', '$DNS_DOMAIN');
 define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
