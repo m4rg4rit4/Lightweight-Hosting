@@ -39,6 +39,7 @@ if (empty($php_socket) || !file_exists($php_socket)) {
 }
 
 require '/var/www/admin_panel/config.php';
+require_once '/var/www/admin_panel/dns_utils.php';
 
 try {
     $pdo = getPDO();
@@ -229,6 +230,13 @@ try {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX (site_id)
     )");
+
+    // Nuevas columnas para caché de sincronización DNS
+    $pdo->exec("ALTER TABLE sys_dns_servers ADD COLUMN IF NOT EXISTS sync_status VARCHAR(50) DEFAULT 'ok'");
+    $pdo->exec("ALTER TABLE sys_dns_servers ADD COLUMN IF NOT EXISTS last_sync_check DATETIME");
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS dns_sync_status VARCHAR(100) DEFAULT 'ok'");
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS dns_last_sync DATETIME");
+
 } catch (Exception $e) {
     // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root
 }
@@ -912,4 +920,100 @@ foreach ($tasks as $task) {
     $pdo->prepare("UPDATE sys_tasks SET status = ?, result_msg = ? WHERE id = ?")->execute([$status, $msg, $taskId]);
     echo "Task $taskId ($domain): $status - $msg\n";
 }
+
+// --- Mantenimiento Periódico: Sincronización DNS (Cada 5 minutos) ---
+$lastDnsCheck = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'last_global_dns_sync_check'")->fetchColumn();
+if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
+    echo "Iniciando comprobación periódica de sincronización DNS...\n";
+    
+    $dnsServers = getDnsServers();
+    if (count($dnsServers) > 1) {
+        $primary = $dnsServers[0];
+        
+        // 1. Obtener zonas del principal
+        $resZones = dnsApiRequestOnServer($primary['url'], '/api-dns/zones', 'GET', null, $primary['token']);
+        $apiZones = [];
+        if ($resZones['code'] === 200) {
+            $dataZones = json_decode($resZones['response'], true);
+            $apiZonesRaw = $dataZones['zones'] ?? $dataZones['data'] ?? [];
+            $apiZones = (!empty($apiZonesRaw) && isset($apiZonesRaw[0]['domain'])) ? array_column($apiZonesRaw, 'domain') : (array)$apiZonesRaw;
+        }
+
+        foreach ($dnsServers as $idx => $srv) {
+            if ($idx === 0) continue;
+            
+            $srvStatus = 'ok';
+            $srvMsg = '';
+            
+            $resOther = dnsApiRequestOnServer($srv['url'], '/api-dns/zones', 'GET', null, $srv['token']);
+            if ($resOther['code'] !== 200) {
+                $srvStatus = 'error';
+                $srvMsg = "Inaccesible (Código {$resOther['code']})";
+            } else {
+                $dataOther = json_decode($resOther['response'], true);
+                $zORaw = $dataOther['zones'] ?? $dataOther['data'] ?? [];
+                $zO = (!empty($zORaw) && isset($zORaw[0]['domain'])) ? array_column($zORaw, 'domain') : (array)$zORaw;
+                
+                if (count($apiZones) !== count($zO) || !empty(array_diff($apiZones, $zO)) || !empty(array_diff($zO, $apiZones))) {
+                    $srvStatus = 'warning';
+                    $srvMsg = "Desincronizado (Zonas)";
+                }
+            }
+            
+            $pdo->prepare("UPDATE sys_dns_servers SET sync_status = ?, last_sync_check = NOW() WHERE id = ?")
+                ->execute([$srvStatus, $srv['id']]);
+            echo "Servidor DNS {$srv['name']}: $srvStatus $srvMsg\n";
+        }
+
+        // 2. Verificar registros de cada sitio/zona individualmente
+        $sites = $pdo->query("SELECT id, domain FROM sys_sites WHERE status = 'active'")->fetchAll();
+        foreach ($sites as $site) {
+            $d = $site['domain'];
+            // Solo si está en el DNS principal
+            if (!in_array($d, $apiZones)) continue;
+
+            $syncStatus = 'ok';
+            $resRS = dnsApiRequestOnServer($primary['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $primary['token']);
+            if ($resRS['code'] === 200) {
+                $rSData = json_decode($resRS['response'], true);
+                $rS = $rSData['records'] ?? [];
+                
+                if (!empty($rS)) {
+                    $mH = [];
+                    foreach ((array)$rS as $r) {
+                        if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
+                        $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                    }
+
+                    foreach ($dnsServers as $idx => $srv) {
+                        if ($idx === 0) continue;
+                        $resRT = dnsApiRequestOnServer($srv['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $srv['token']);
+                        if ($resRT['code'] !== 200) {
+                            $syncStatus = 'error_connection';
+                            break;
+                        }
+                        $rTData = json_decode($resRT['response'], true);
+                        $rT = $rTData['records'] ?? [];
+                        $oH = [];
+                        foreach ((array)$rT as $r) {
+                            if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
+                            $oH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                        }
+                        if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
+                            $syncStatus = 'desync';
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            $pdo->prepare("UPDATE sys_sites SET dns_sync_status = ?, dns_last_sync = NOW() WHERE id = ?")
+                ->execute([$syncStatus, $site['id']]);
+        }
+    }
+    
+    $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('last_global_dns_sync_check', NOW())")->execute();
+    echo "Mantenimiento DNS completado.\n";
+}
 ?>
+

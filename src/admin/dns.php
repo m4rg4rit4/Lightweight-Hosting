@@ -25,26 +25,25 @@ if (!empty($servers)) {
 
 function getDomainHierarchy($allDomains) {
     $hierarchy = [];
-    $sortedDomains = $allDomains;
-    // Ordenar por longitud para procesar raíces primero
-    usort($sortedDomains, function($a, $b) {
-        $partsA = substr_count($a, '.');
-        $partsB = substr_count($b, '.');
-        if ($partsA == $partsB) return strlen($a) - strlen($b);
-        return $partsA - $partsB;
-    });
-
-    foreach ($sortedDomains as $domain) {
+    $allDomainsSet = array_flip($allDomains);
+    
+    foreach ($allDomains as $domain) {
+        $parts = explode('.', $domain);
         $foundParent = false;
-        foreach (array_keys($hierarchy) as $root) {
-            if ($domain === $root) continue;
-            // Comprobar si el dominio termina en .root
-            if (strpos($domain, '.' . $root) !== false && substr($domain, -strlen('.' . $root)) === '.' . $root) {
-                $hierarchy[$root]['subs'][] = $domain;
+        
+        // Buscar el padre directo más cercano que esté en la lista
+        for ($i = 1; $i < count($parts); $i++) {
+            $parentCandidate = implode('.', array_slice($parts, $i));
+            if (isset($allDomainsSet[$parentCandidate])) {
+                if (!isset($hierarchy[$parentCandidate])) {
+                    $hierarchy[$parentCandidate] = ['subs' => []];
+                }
+                $hierarchy[$parentCandidate]['subs'][] = $domain;
                 $foundParent = true;
                 break;
             }
         }
+        
         if (!$foundParent) {
             if (!isset($hierarchy[$domain])) {
                 $hierarchy[$domain] = ['subs' => []];
@@ -333,24 +332,22 @@ if ($resZones['code'] === 200) {
     }
 }
 
-// Verificación de sincronización
-$syncInfo = ['needed' => false, 'messages' => []];
+// Verificación de sincronización (BASADA EN CACHÉ DE DB PARA MÁXIMA VELOCIDAD)
+$syncInfo = ['needed' => false, 'messages' => [], 'last_check' => ''];
+$lastGlobalCheck = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'last_global_dns_sync_check'")->fetchColumn();
+$syncInfo['last_check'] = $lastGlobalCheck ? date('d/m/Y H:i', strtotime($lastGlobalCheck)) : 'Nunca';
+
 if (count($dnsServers) > 1) {
-    foreach ($dnsServers as $idx => $srv) {
-        if ($idx === 0) continue;
-        $resOther = dnsApiRequestOnServer($srv['url'], '/api-dns/zones', 'GET', null, $srv['token']);
-        if ($resOther['code'] !== 200) {
+    // 1. Verificar estado global de servidores secundarios
+    $stmtSrv = $pdo->query("SELECT name, sync_status FROM sys_dns_servers WHERE is_active = 1 AND id > 1");
+    while ($srvCache = $stmtSrv->fetch()) {
+        if ($srvCache['sync_status'] !== 'ok') {
             $syncInfo['needed'] = true;
-            $syncInfo['messages'][] = "Servidor " . parse_url($srv['url'], PHP_URL_HOST) . " inaccesible.";
-            continue;
-        }
-        $dataOther = json_decode($resOther['response'], true);
-        $zORaw = $dataOther['zones'] ?? $dataOther['data'] ?? [];
-        $zO = (!empty($zORaw) && isset($zORaw[0]['domain'])) ? array_column($zORaw, 'domain') : $zORaw;
-        if (count($apiZones) !== count($zO) || !empty(array_diff($apiZones, $zO)) || !empty(array_diff($zO, $apiZones))) {
-            $syncInfo['needed'] = true;
-            $syncInfo['messages'][] = "Diferencias en el listado de zonas globales.";
-            break;
+            if ($srvCache['sync_status'] === 'warning') {
+                $syncInfo['messages'][] = "Sincronización de zonas incompleta en {$srvCache['name']}.";
+            } else {
+                $syncInfo['messages'][] = "El servidor secundario {$srvCache['name']} no es accesible.";
+            }
         }
     }
 }
@@ -367,38 +364,15 @@ if ($activeDomain) {
         if ($data['success'] ?? false) {
             $records = $data['records'] ?? [];
             
-            // Verificación de registros si hay dominio activo y múltiples servidores
+            // Verificación de registros (vía Caché de DB)
             if (!$syncInfo['needed'] && count($dnsServers) > 1 && !empty($records)) {
-                $mH = [];
-                foreach ((array)$records as $r) {
-                    if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
-                    $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
-                }
-
-                foreach ($dnsServers as $idx => $srv) {
-                    if ($idx === 0) continue;
-                    $resOtherR = dnsApiRequestOnServer($srv['url'], '/api-dns/records/' . urlencode($activeDomain), 'GET', null, $srv['token']);
-                    if ($resOtherR['code'] !== 200) {
-                        $syncInfo['needed'] = true;
-                        $syncInfo['messages'][] = "Error al verificar registros de $activeDomain en " . parse_url($srv['url'], PHP_URL_HOST);
-                        break;
-                    }
-                    $rOtherData = json_decode($resOtherR['response'], true);
-                    $rOther = (array)($rOtherData['records'] ?? []);
-                    
-                    $oH = [];
-                    foreach ($rOther as $r) {
-                        if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
-                        $oH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
-                    }
-
-                    if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
-                        $syncInfo['needed'] = true;
-                        if (!in_array("Registros de $activeDomain desincronizados.", $syncInfo['messages'])) {
-                            $syncInfo['messages'][] = "Registros de $activeDomain desincronizados.";
-                        }
-                        break;
-                    }
+                $stmtSite = $pdo->prepare("SELECT dns_sync_status FROM sys_sites WHERE domain = ?");
+                $stmtSite->execute([$activeDomain]);
+                $siteStatus = $stmtSite->fetchColumn();
+                
+                if ($siteStatus && $siteStatus !== 'ok') {
+                    $syncInfo['needed'] = true;
+                    $syncInfo['messages'][] = "Los registros de $activeDomain están desincronizados entre los servidores.";
                 }
             }
         } else {
@@ -452,6 +426,7 @@ if ($activeDomain && isset($_GET['export'])) {
                      <div>
                          <strong style="display: block; font-size: 1rem;">Sincronización de DNS Requerida</strong>
                          <span style="font-size: 0.85rem; opacity: 0.8;"><?php echo implode(' ', $syncInfo['messages']); ?></span>
+                         <div style="font-size: 0.7rem; opacity: 0.6; margin-top: 4px;">Última validación automática: <?php echo $syncInfo['last_check']; ?></div>
                      </div>
                  </div>
                  <form method="POST" style="margin: 0;">
