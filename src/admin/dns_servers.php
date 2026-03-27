@@ -84,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "Accept: application/json"
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
@@ -167,7 +168,7 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                     </div>
                     <div class="form-group" style="flex: 2;">
                         <label>URL del Servidor</label>
-                        <input type="text" name="url" id="add_url" placeholder="https://dns1.example.com:8080" required>
+                        <input type="text" name="url" id="add_url" placeholder="https://dns1.example.com:8090" required>
                     </div>
                 </div>
                 <div class="form-row">
