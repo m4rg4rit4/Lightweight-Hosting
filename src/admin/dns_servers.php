@@ -401,7 +401,7 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                 }
             } catch (error) { console.error('Error checking tasks:', error); }
         }
-        setInterval(checkTasks, 5000);
+        setInterval(checkTasks, 30000);
         checkTasks();
     </script>
 </body>

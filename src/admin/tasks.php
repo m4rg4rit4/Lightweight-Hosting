@@ -228,7 +228,7 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50"
                 }
             } catch (error) { console.error('Error checking tasks:', error); }
         }
-        setInterval(checkTasks, 5000);
+        setInterval(checkTasks, 30000);
         checkTasks();
     </script>
 </body>

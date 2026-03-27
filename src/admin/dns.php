@@ -839,7 +839,7 @@ if ($activeDomain && isset($_GET['export'])) {
                 }
             } catch (error) { console.error('Error checking tasks:', error); }
         }
-        setInterval(checkTasks, 5000);
+        setInterval(checkTasks, 30000);
         checkTasks();
 
         // Cerrar modal al hacer clic fuera

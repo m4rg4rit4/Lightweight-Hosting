@@ -398,8 +398,8 @@ if (hasDnsServers()) {
             }
         }
 
-        // Comprobar cada 5 segundos
-        setInterval(checkTasks, 5000);
+        // Comprobar cada 30 segundos
+        setInterval(checkTasks, 30000);
         // Comprobación inicial
         checkTasks();
     </script>
