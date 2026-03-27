@@ -930,31 +930,36 @@ if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
     if (count($dnsServers) > 1) {
         $primary = $dnsServers[0];
         
-        // 1. Obtener zonas del principal
-        $resZones = dnsApiRequestOnServer($primary['url'], '/api-dns/zones', 'GET', null, $primary['token']);
-        $apiZones = [];
-        if ($resZones['code'] === 200) {
-            $dataZones = json_decode($resZones['response'], true);
-            $apiZonesRaw = $dataZones['zones'] ?? $dataZones['data'] ?? [];
-            $apiZones = (!empty($apiZonesRaw) && isset($apiZonesRaw[0]['domain'])) ? array_column($apiZonesRaw, 'domain') : (array)$apiZonesRaw;
+        // 1. Obtener estados de zonas de TODOS los servidores (para comparar timestamps/seriales)
+        $srvZones = [];
+        foreach ($dnsServers as $srv) {
+            $res = dnsApiRequestOnServer($srv['url'], '/api-dns/zones', 'GET', null, $srv['token']);
+            if ($res['code'] === 200) {
+                $data = json_decode($res['response'], true);
+                $raw = $data['zones'] ?? $data['data'] ?? [];
+                foreach ($raw as $z) {
+                    $srvZones[$srv['id']][$z['domain']] = $z['updated_at'] ?? '0';
+                }
+            } else {
+                $srvZones[$srv['id']] = null; // Inaccesible
+            }
         }
 
+        $primaryZones = $srvZones[$primary['id']] ?? [];
+
+        // 2. Actualizar estado de los servidores secundarios (Zonas globales)
         foreach ($dnsServers as $idx => $srv) {
             if ($idx === 0) continue;
             
             $srvStatus = 'ok';
             $srvMsg = '';
             
-            $resOther = dnsApiRequestOnServer($srv['url'], '/api-dns/zones', 'GET', null, $srv['token']);
-            if ($resOther['code'] !== 200) {
+            if ($srvZones[$srv['id']] === null) {
                 $srvStatus = 'error';
-                $srvMsg = "Inaccesible (Código {$resOther['code']})";
+                $srvMsg = "Inaccesible";
             } else {
-                $dataOther = json_decode($resOther['response'], true);
-                $zORaw = $dataOther['zones'] ?? $dataOther['data'] ?? [];
-                $zO = (!empty($zORaw) && isset($zORaw[0]['domain'])) ? array_column($zORaw, 'domain') : (array)$zORaw;
-                
-                if (count($apiZones) !== count($zO) || !empty(array_diff($apiZones, $zO)) || !empty(array_diff($zO, $apiZones))) {
+                $otherZones = $srvZones[$srv['id']];
+                if (count($primaryZones) !== count($otherZones) || !empty(array_diff_key($primaryZones, $otherZones)) || !empty(array_diff_key($otherZones, $primaryZones))) {
                     $srvStatus = 'warning';
                     $srvMsg = "Desincronizado (Zonas)";
                 }
@@ -962,55 +967,75 @@ if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
             
             $pdo->prepare("UPDATE sys_dns_servers SET sync_status = ?, last_sync_check = NOW() WHERE id = ?")
                 ->execute([$srvStatus, $srv['id']]);
-            echo "Servidor DNS {$srv['name']}: $srvStatus $srvMsg\n";
         }
 
-        // 2. Verificar registros de cada sitio/zona individualmente
-        $sites = $pdo->query("SELECT id, domain FROM sys_sites WHERE status = 'active'")->fetchAll();
+        // 3. Verificar cada sitio individualmente de forma optimizada
+        $sites = $pdo->query("SELECT id, domain, dns_sync_status, dns_last_sync FROM sys_sites WHERE status = 'active'")->fetchAll();
         foreach ($sites as $site) {
             $d = $site['domain'];
-            // Solo si está en el DNS principal
-            if (!in_array($d, $apiZones)) continue;
+            if (!isset($primaryZones[$d])) continue;
 
-            $syncStatus = 'ok';
-            $resRS = dnsApiRequestOnServer($primary['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $primary['token']);
-            if ($resRS['code'] === 200) {
-                $rSData = json_decode($resRS['response'], true);
-                $rS = $rSData['records'] ?? [];
-                
-                if (!empty($rS)) {
-                    $mH = [];
-                    foreach ((array)$rS as $r) {
-                        if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
-                        $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
-                    }
+            $primaryTS = $primaryZones[$d];
+            $syncNeeded = false;
+            
+            // Comprobar si algún servidor secundario tiene un timestamp diferente
+            foreach ($dnsServers as $idx => $srv) {
+                if ($idx === 0) continue;
+                $otherTS = $srvZones[$srv['id']][$d] ?? null;
+                if ($otherTS !== $primaryTS) {
+                    $syncNeeded = true;
+                    break;
+                }
+            }
 
-                    foreach ($dnsServers as $idx => $srv) {
-                        if ($idx === 0) continue;
-                        $resRT = dnsApiRequestOnServer($srv['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $srv['token']);
-                        if ($resRT['code'] !== 200) {
-                            $syncStatus = 'error_connection';
-                            break;
-                        }
-                        $rTData = json_decode($resRT['response'], true);
-                        $rT = $rTData['records'] ?? [];
-                        $oH = [];
-                        foreach ((array)$rT as $r) {
+            $currentStatus = 'ok';
+            if ($syncNeeded) {
+                // SOLO si hay discrepancia de timestamps, entramos a auditar registros (Deep Check)
+                $resRS = dnsApiRequestOnServer($primary['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $primary['token']);
+                if ($resRS['code'] === 200) {
+                    $rSData = json_decode($resRS['response'], true);
+                    $rS = $rSData['records'] ?? [];
+                    
+                    if (!empty($rS)) {
+                        $mH = [];
+                        foreach ((array)$rS as $r) {
                             if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
-                            $oH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                            $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
                         }
-                        if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
-                            $syncStatus = 'desync';
-                            break;
+
+                        foreach ($dnsServers as $idx => $srv) {
+                            if ($idx === 0) continue;
+                            if (($srvZones[$srv['id']][$d] ?? null) === $primaryTS) continue; // Saltar si este ya coincide
+
+                            $resRT = dnsApiRequestOnServer($srv['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $srv['token']);
+                            if ($resRT['code'] !== 200) {
+                                $currentStatus = 'error_connection';
+                                break;
+                            }
+                            $rTData = json_decode($resRT['response'], true);
+                            $rT = $rTData['records'] ?? [];
+                            $oH = [];
+                            foreach ((array)$rT as $r) {
+                                if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
+                                $oH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                            }
+                            if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
+                                $currentStatus = 'desync';
+                                break;
+                            }
                         }
                     }
                 }
             }
             
-            $pdo->prepare("UPDATE sys_sites SET dns_sync_status = ?, dns_last_sync = NOW() WHERE id = ?")
-                ->execute([$syncStatus, $site['id']]);
+            // Solo actualizar si el estado cambia o han pasado más de 24h desde el último check
+            if ($currentStatus !== $site['dns_sync_status'] || strtotime($site['dns_last_sync'] ?? '0') < (time() - 86400)) {
+                $pdo->prepare("UPDATE sys_sites SET dns_sync_status = ?, dns_last_sync = NOW() WHERE id = ?")
+                    ->execute([$currentStatus, $site['id']]);
+            }
         }
     }
+
     
     $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('last_global_dns_sync_check', NOW())")->execute();
     echo "Mantenimiento DNS completado.\n";
