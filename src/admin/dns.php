@@ -3,16 +3,18 @@ session_start();
 require 'config.php';
 require_once 'dns_utils.php';
 
-// Verificación estricta de configuración DNS
-if (!defined('DNS_TOKEN') || !defined('DNS_SERVER') || empty(DNS_TOKEN) || empty(DNS_SERVER)) {
-    $_SESSION['flash_msg'] = "La gestión DNS no está configurada. Introduce un DNS_TOKEN y DNS_SERVER en config.php.";
+// Verificación: se necesita al menos un servidor DNS configurado
+$dnsServers = getDnsServers();
+if (empty($dnsServers)) {
+    $_SESSION['flash_msg'] = "No hay servidores DNS configurados. Añade al menos un servidor desde el panel de Servidores DNS.";
     $_SESSION['flash_type'] = "error";
-    header("Location: index.php");
+    header("Location: dns_servers.php");
     exit;
 }
 
 $pdo = getPDO();
-$servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
+// Array de URLs para compatibilidad con código de sync
+$servers = array_column($dnsServers, 'url');
 $baseUrl = '';
 if (!empty($servers)) {
     $serverUrl = $servers[0];
@@ -208,15 +210,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif ($action === 'sync_dns') {
             $scope = $_POST['scope'] ?? 'all';
             $domain = $_POST['domain'] ?? '';
-            $source = $servers[0];
+            $source = $dnsServers[0];
             $count = 0;
             
-            foreach ($servers as $idx => $sUrl) {
+            foreach ($dnsServers as $idx => $targetSrv) {
                 if ($idx === 0) continue;
+                $sUrl = $targetSrv['url'];
+                $sToken = $targetSrv['token'];
                 
                 // Obtener zonas de ambos
-                $resS = dnsApiRequestOnServer($source, '/api-dns/zones', 'GET');
-                $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
+                $resS = dnsApiRequestOnServer($source['url'], '/api-dns/zones', 'GET', null, $source['token']);
+                $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET', null, $sToken);
                 if ($resS['code'] !== 200 || $resT['code'] !== 200) continue;
 
                 $zSData = json_decode($resS['response'], true);
@@ -228,12 +232,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $zTNames = (!empty($zT) && isset($zT[0]['domain'])) ? (array)array_column($zT, 'domain') : (array)$zT;
 
                 if ($scope === 'all') {
-                    // Sincronizar Zonas faltantes
                     foreach ($zSNames as $z) {
                         if (!in_array($z, $zTNames)) {
-                            // Intentar encontrar una IP razonable para la zona de origen
                             $targetIp = '';
-                            $resRecs = dnsApiRequestOnServer($source, '/api-dns/records/' . urlencode($z), 'GET');
+                            $resRecs = dnsApiRequestOnServer($source['url'], '/api-dns/records/' . urlencode($z), 'GET', null, $source['token']);
                             if ($resRecs['code'] === 200) {
                                 $recs = json_decode($resRecs['response'], true)['records'] ?? [];
                                 foreach ($recs as $r) {
@@ -243,23 +245,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     }
                                 }
                             }
-                            $rA = dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', ['domain' => $z, 'ip' => $targetIp]);
+                            $rA = dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', ['domain' => $z, 'ip' => $targetIp], $sToken);
                             if ($rA['code'] === 200) $count++;
                         }
                     }
-                    // Después de añadir zonas, refrescar lista de T para sincronizar registros
-                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
+                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET', null, $sToken);
                     $zTData = json_decode($resT['response'], true);
                     $zTNames = array_column($zTData['zones'] ?? [], 'domain');
                 }
 
-                // Sincronizar registros de dominios desincronizados
                 $domainsToSync = ($scope === 'domain' && !empty($domain)) ? [$domain] : $zSNames;
                 foreach ($domainsToSync as $d) {
                     if (!in_array($d, $zTNames)) continue;
 
-                    $resRS = dnsApiRequestOnServer($source, '/api-dns/records/' . urlencode($d), 'GET');
-                    $resRT = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($d), 'GET');
+                    $resRS = dnsApiRequestOnServer($source['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $source['token']);
+                    $resRT = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($d), 'GET', null, $sToken);
                     if ($resRS['code'] === 200 && $resRT['code'] === 200) {
                         $rS = (array)(json_decode($resRS['response'], true)['records'] ?? []);
                         $rT = (array)(json_decode($resRT['response'], true)['records'] ?? []);
@@ -280,7 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'content' => $rs['content'],
                                     'ttl' => $rs['ttl'],
                                     'priority' => $rs['priority'] ?? null
-                                ]);
+                                ], $sToken);
                                 if ($rA['code'] === 200) $count++;
                             }
                         }
@@ -335,13 +335,13 @@ if ($resZones['code'] === 200) {
 
 // Verificación de sincronización
 $syncInfo = ['needed' => false, 'messages' => []];
-if (count($servers) > 1) {
-    foreach ($servers as $idx => $sUrl) {
+if (count($dnsServers) > 1) {
+    foreach ($dnsServers as $idx => $srv) {
         if ($idx === 0) continue;
-        $resOther = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET');
+        $resOther = dnsApiRequestOnServer($srv['url'], '/api-dns/zones', 'GET', null, $srv['token']);
         if ($resOther['code'] !== 200) {
             $syncInfo['needed'] = true;
-            $syncInfo['messages'][] = "Servidor " . parse_url($sUrl, PHP_URL_HOST) . " inaccesible.";
+            $syncInfo['messages'][] = "Servidor " . parse_url($srv['url'], PHP_URL_HOST) . " inaccesible.";
             continue;
         }
         $dataOther = json_decode($resOther['response'], true);
@@ -368,20 +368,19 @@ if ($activeDomain) {
             $records = $data['records'] ?? [];
             
             // Verificación de registros si hay dominio activo y múltiples servidores
-            if (!$syncInfo['needed'] && count($servers) > 1 && !empty($records)) {
-                // Generar hashes de registros del servidor principal (excluyendo SOA/NS por ser locales)
+            if (!$syncInfo['needed'] && count($dnsServers) > 1 && !empty($records)) {
                 $mH = [];
                 foreach ((array)$records as $r) {
                     if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
                     $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
                 }
 
-                foreach ($servers as $idx => $sUrl) {
+                foreach ($dnsServers as $idx => $srv) {
                     if ($idx === 0) continue;
-                    $resOtherR = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($activeDomain), 'GET');
+                    $resOtherR = dnsApiRequestOnServer($srv['url'], '/api-dns/records/' . urlencode($activeDomain), 'GET', null, $srv['token']);
                     if ($resOtherR['code'] !== 200) {
                         $syncInfo['needed'] = true;
-                        $syncInfo['messages'][] = "Error al verificar registros de $activeDomain en " . parse_url($sUrl, PHP_URL_HOST);
+                        $syncInfo['messages'][] = "Error al verificar registros de $activeDomain en " . parse_url($srv['url'], PHP_URL_HOST);
                         break;
                     }
                     $rOtherData = json_decode($resOtherR['response'], true);
@@ -471,34 +470,40 @@ if ($activeDomain && isset($_GET['export'])) {
         <div class="main-layout">
             <!-- Sidebar: Lista de Dominios Raíz -->
             <div class="sidebar">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                    <h3 style="margin:0; font-size: 1.2rem;">Dominios Raíz</h3>
-                    <button onclick="document.getElementById('modal-add').style.display='flex'" class="btn btn-primary" style="padding: 6px 12px; border-radius: 8px; font-size: 1.1rem;">+</button>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3 style="margin:0; font-size: 1.1rem;">Dominios</h3>
+                    <button onclick="document.getElementById('modal-add').style.display='flex'" class="btn btn-primary" style="padding: 4px 10px; border-radius: 8px; font-size: 1rem;">+</button>
                 </div>
                 
-                <div style="max-height: calc(100vh - 250px); overflow-y: auto; padding-right: 5px;">
+                <!-- Filtro de búsqueda -->
+                <div style="margin-bottom: 12px;">
+                    <input type="text" id="domain-search" placeholder="🔍 Buscar dominio..." oninput="filterDomains(this.value)" style="width: 100%; box-sizing: border-box; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 0.85rem;">
+                </div>
+                
+                <div style="max-height: calc(100vh - 290px); overflow-y: auto; padding-right: 5px;">
                     <?php if (empty($hierarchy)): ?>
                         <div class="empty-state" style="padding: 20px;">
                             <p style="font-size: 0.9rem;">No hay dominios registrados.</p>
                         </div>
                     <?php else: ?>
                         <?php foreach ($hierarchy as $domain => $data): ?>
-                            <a href="?domain=<?php echo urlencode($domain); ?>" class="domain-card <?php echo ($activeDomain === $domain) ? 'active' : ''; ?>">
-                                <h4><?php echo htmlspecialchars($domain); ?></h4>
-                                <div class="meta" style="display: flex; gap: 4px; margin-top: 6px;">
+                            <a href="?domain=<?php echo urlencode($domain); ?>" class="domain-card <?php echo ($activeDomain === $domain) ? 'active' : ''; ?>" data-domain="<?php echo htmlspecialchars($domain); ?>">
+                                <h4 style="font-size: 0.9rem; margin: 0;"><?php echo htmlspecialchars($domain); ?></h4>
+                                <div class="meta" style="display: flex; gap: 4px; margin-top: 4px;">
                                     <?php if (in_array($domain, $localSites)): ?>
-                                        <span class="badge badge-local" title="Este dominio tiene hosting local configurado">Sitio</span>
+                                        <span class="badge badge-local" style="padding: 2px 6px; font-size: 0.65rem;">Sitio</span>
                                     <?php endif; ?>
                                     <?php if (in_array($domain, $apiZones)): ?>
-                                        <span class="badge badge-api" title="Este dominio tiene zona autoritativa en el servidor DNS">DNS</span>
+                                        <span class="badge badge-api" style="padding: 2px 6px; font-size: 0.65rem;">DNS</span>
                                     <?php endif; ?>
                                     <?php if (!empty($data['subs'])): ?>
-                                        <span style="font-size: 0.75rem; color: var(--text-dim); margin-left: 4px;">• <?php echo count($data['subs']); ?> subs</span>
+                                        <span style="font-size: 0.65rem; color: var(--text-dim); margin-left: 2px;">• <?php echo count($data['subs']); ?> subs</span>
                                     <?php endif; ?>
                                 </div>
                             </a>
                         <?php endforeach; ?>
                     <?php endif; ?>
+                    <div id="no-results" style="display: none; text-align: center; padding: 20px; color: var(--text-dim); font-size: 0.85rem;">Sin resultados</div>
                 </div>
             </div>
 
@@ -797,6 +802,23 @@ if ($activeDomain && isset($_GET['export'])) {
             const type = document.getElementById('record_type').value;
             const group = document.getElementById('priority_group');
             group.style.display = (type === 'MX' || type === 'SRV') ? 'block' : 'none';
+        }
+
+        function filterDomains(query) {
+            const cards = document.querySelectorAll('.domain-card[data-domain]');
+            const noResults = document.getElementById('no-results');
+            let visible = 0;
+            query = query.toLowerCase().trim();
+            cards.forEach(card => {
+                const domain = card.getAttribute('data-domain');
+                if (!query || domain.includes(query)) {
+                    card.style.display = '';
+                    visible++;
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            noResults.style.display = visible === 0 && query ? 'block' : 'none';
         }
 
         function editRecord(record) {

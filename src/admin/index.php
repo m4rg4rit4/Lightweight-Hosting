@@ -129,7 +129,7 @@ $localDomains = array_column($sites, 'domain');
 // Obtener zonas DNS disponibles si están habilitadas
 $apiZones = [];
 $apiAvailableZones = [];
-if (defined('DNS_TOKEN') && !empty(DNS_TOKEN)) {
+if (hasDnsServers()) {
     $resZones = dnsApiRequest('/api-dns/zones', 'GET');
     if ($resZones['code'] === 200) {
         $dataZones = json_decode($resZones['response'], true);

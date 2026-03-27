@@ -350,6 +350,15 @@ mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_backups (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX (site_id)
 );"
+mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_dns_servers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    url VARCHAR(255) NOT NULL,
+    token VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);"
+
 mariadb -e "FLUSH PRIVILEGES;"
 
 # Crear primer sitio (el host principal)
@@ -401,6 +410,7 @@ curl -sSL "$REPO_RAW/src/admin/backups.php" -o "$TEMP_DIR/backups.php"
 curl -sSL "$REPO_RAW/src/admin/header.php" -o "$TEMP_DIR/header.php"
 curl -sSL "$REPO_RAW/src/admin/dns.php" -o "$TEMP_DIR/dns.php"
 curl -sSL "$REPO_RAW/src/admin/dns_utils.php" -o "$TEMP_DIR/dns_utils.php"
+curl -sSL "$REPO_RAW/src/admin/dns_servers.php" -o "$TEMP_DIR/dns_servers.php"
 curl -sSL "$REPO_RAW/src/admin/admin-style.css" -o "$TEMP_DIR/admin-style.css"
 curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
 curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
@@ -427,6 +437,7 @@ cp "$TEMP_DIR/backups.php" "$ADMIN_PATH/backups.php"
 cp "$TEMP_DIR/header.php" "$ADMIN_PATH/header.php"
 cp "$TEMP_DIR/dns.php" "$ADMIN_PATH/dns.php"
 cp "$TEMP_DIR/dns_utils.php" "$ADMIN_PATH/dns_utils.php"
+cp "$TEMP_DIR/dns_servers.php" "$ADMIN_PATH/dns_servers.php"
 cp "$TEMP_DIR/admin-style.css" "$ADMIN_PATH/admin-style.css"
 cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
 cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"

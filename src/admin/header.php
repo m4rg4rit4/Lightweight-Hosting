@@ -13,8 +13,10 @@
     <a href="backups.php" class="<?php echo ($current_page === 'backups.php') ? 'active' : ''; ?>">Backups (MEGA)</a>
     <a href="<?php echo defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'dbadmin'; ?>/" target="_blank" class="<?php echo ($current_page === 'databases.php') ? 'active' : ''; ?>">Base de Datos</a>
     
-    <?php if (defined('DNS_TOKEN') && defined('DNS_SERVER') && !empty(DNS_TOKEN) && !empty(DNS_SERVER)): 
-        require_once 'dns_utils.php';
+    <?php 
+    require_once 'dns_utils.php';
+    $hasDns = hasDnsServers();
+    if ($hasDns):
         $dnsHealth = getDnsClusterHealth();
         $healthColor = 'var(--success)';
         if ($dnsHealth['status'] === 'warning') $healthColor = 'var(--warning)';
@@ -25,6 +27,14 @@
             <span style="width: 8px; height: 8px; border-radius: 50%; background: <?php echo $healthColor; ?>;" title="<?php echo htmlspecialchars($dnsHealth['message']); ?>"></span>
         </a>
     <?php endif; ?>
+    
+    <a href="dns_servers.php" class="<?php echo ($current_page === 'dns_servers.php') ? 'active' : ''; ?>" style="display: flex; align-items: center; gap: 4px;">
+        <?php if ($hasDns): ?>
+            ⚙️
+        <?php else: ?>
+            🖧 DNS Servers
+        <?php endif; ?>
+    </a>
     
     <?php if ($current_page === 'filemanager.php'): ?>
         <span>/ Administrador de Archivos</span>
