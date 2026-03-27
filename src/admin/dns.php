@@ -24,39 +24,33 @@ if (!empty($servers)) {
 // Lógica de agrupación jerárquica
 
 function getDomainHierarchy($allDomains) {
-    if (empty($allDomains)) return [];
-    
-    // Convertir a conjunto para búsqueda rápida O(1)
-    $domainSet = array_flip($allDomains);
     $hierarchy = [];
-    
-    // Primero, identificar raíces y guardar todos en un mapa
-    foreach ($allDomains as $domain) {
-        $parts = explode('.', $domain);
-        $isSub = false;
-        
-        // Un dominio es subdominio si su "padre" (ej. example.com para www.example.com) 
-        // existe en nuestra lista de dominios procesados.
-        if (count($parts) > 2) {
-            $parent = implode('.', array_slice($parts, 1));
-            if (isset($domainSet[$parent])) {
-                $isSub = true;
-                $hierarchy[$parent]['subs'][] = $domain;
+    $sortedDomains = $allDomains;
+    // Ordenar por longitud para procesar raíces primero
+    usort($sortedDomains, function($a, $b) {
+        $partsA = substr_count($a, '.');
+        $partsB = substr_count($b, '.');
+        if ($partsA == $partsB) return strlen($a) - strlen($b);
+        return $partsA - $partsB;
+    });
+
+    foreach ($sortedDomains as $domain) {
+        $foundParent = false;
+        foreach (array_keys($hierarchy) as $root) {
+            if ($domain === $root) continue;
+            // Comprobar si el dominio termina en .root
+            if (strpos($domain, '.' . $root) !== false && substr($domain, -strlen('.' . $root)) === '.' . $root) {
+                $hierarchy[$root]['subs'][] = $domain;
+                $foundParent = true;
+                break;
             }
         }
-        
-        if (!$isSub && !isset($hierarchy[$domain])) {
-            $hierarchy[$domain] = ['subs' => []];
+        if (!$foundParent) {
+            if (!isset($hierarchy[$domain])) {
+                $hierarchy[$domain] = ['subs' => []];
+            }
         }
     }
-    
-    // Asegurar que las raíces que se convirtieron en padres pero se procesaron después existan
-    foreach ($allDomains as $domain) {
-        if (!isset($hierarchy[$domain])) {
-             // Este caso no debería darse con la lógica anterior si el padre fue procesado
-        }
-    }
-
     ksort($hierarchy);
     return $hierarchy;
 }
@@ -339,6 +333,28 @@ if ($resZones['code'] === 200) {
     }
 }
 
+// Verificación de sincronización
+$syncInfo = ['needed' => false, 'messages' => []];
+if (count($dnsServers) > 1) {
+    foreach ($dnsServers as $idx => $srv) {
+        if ($idx === 0) continue;
+        $resOther = dnsApiRequestOnServer($srv['url'], '/api-dns/zones', 'GET', null, $srv['token']);
+        if ($resOther['code'] !== 200) {
+            $syncInfo['needed'] = true;
+            $syncInfo['messages'][] = "Servidor " . parse_url($srv['url'], PHP_URL_HOST) . " inaccesible.";
+            continue;
+        }
+        $dataOther = json_decode($resOther['response'], true);
+        $zORaw = $dataOther['zones'] ?? $dataOther['data'] ?? [];
+        $zO = (!empty($zORaw) && isset($zORaw[0]['domain'])) ? array_column($zORaw, 'domain') : $zORaw;
+        if (count($apiZones) !== count($zO) || !empty(array_diff($apiZones, $zO)) || !empty(array_diff($zO, $apiZones))) {
+            $syncInfo['needed'] = true;
+            $syncInfo['messages'][] = "Diferencias en el listado de zonas globales.";
+            break;
+        }
+    }
+}
+
 // Combinar y agrupar
 $allDomains = array_unique(array_merge($localSites, $apiZones));
 $hierarchy = getDomainHierarchy($allDomains);
@@ -350,8 +366,43 @@ if ($activeDomain) {
         $data = json_decode($res['response'], true);
         if ($data['success'] ?? false) {
             $records = $data['records'] ?? [];
+            
+            // Verificación de registros si hay dominio activo y múltiples servidores
+            if (!$syncInfo['needed'] && count($dnsServers) > 1 && !empty($records)) {
+                $mH = [];
+                foreach ((array)$records as $r) {
+                    if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
+                    $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                }
+
+                foreach ($dnsServers as $idx => $srv) {
+                    if ($idx === 0) continue;
+                    $resOtherR = dnsApiRequestOnServer($srv['url'], '/api-dns/records/' . urlencode($activeDomain), 'GET', null, $srv['token']);
+                    if ($resOtherR['code'] !== 200) {
+                        $syncInfo['needed'] = true;
+                        $syncInfo['messages'][] = "Error al verificar registros de $activeDomain en " . parse_url($srv['url'], PHP_URL_HOST);
+                        break;
+                    }
+                    $rOtherData = json_decode($resOtherR['response'], true);
+                    $rOther = (array)($rOtherData['records'] ?? []);
+                    
+                    $oH = [];
+                    foreach ($rOther as $r) {
+                        if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
+                        $oH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
+                    }
+
+                    if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
+                        $syncInfo['needed'] = true;
+                        if (!in_array("Registros de $activeDomain desincronizados.", $syncInfo['messages'])) {
+                            $syncInfo['messages'][] = "Registros de $activeDomain desincronizados.";
+                        }
+                        break;
+                    }
+                }
+            }
         } else {
-             $apiError = $data['message'] ?? "Error desconocido en API";
+            $apiError = $data['message'] ?? "Error desconocido en API";
         }
     } elseif ($res['code'] === 404) {
         $apiError = "El dominio no existe en el servidor DNS o no hay registros.";
@@ -359,7 +410,6 @@ if ($activeDomain) {
         $apiError = "No se pudo conectar al servidor DNS (Code: {$res['code']})";
     }
 }
-
 
 // Separar registros para gestión avanzada
 $soaRecord = null;
@@ -395,14 +445,13 @@ if ($activeDomain && isset($_GET['export'])) {
     <div class="container" style="max-width: 1240px;">
         <?php include 'header.php'; ?>
 
-        <!-- Alerta de Sincronización (Dinámica) -->
-        <div id="sync-alert" style="display: none;">
+        <?php if ($syncInfo['needed']): ?>
              <div class="alert alert-warning" style="display: flex; justify-content: space-between; align-items: center; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #d97706; padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; backdrop-filter: blur(10px);">
                  <div style="display: flex; align-items: center; gap: 12px;">
                      <div style="font-size: 1.5rem; background: #f59e0b; color: #fff; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);">⚠️</div>
                      <div>
                          <strong style="display: block; font-size: 1rem;">Sincronización de DNS Requerida</strong>
-                         <span id="sync-message" style="font-size: 0.85rem; opacity: 0.8;"></span>
+                         <span style="font-size: 0.85rem; opacity: 0.8;"><?php echo implode(' ', $syncInfo['messages']); ?></span>
                      </div>
                  </div>
                  <form method="POST" style="margin: 0;">
@@ -412,7 +461,7 @@ if ($activeDomain && isset($_GET['export'])) {
                      <button type="submit" class="btn btn-warning" style="background: #f59e0b; color: white; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 15px rgba(245, 158, 11, 0.3)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(245, 158, 11, 0.2)'">Sincronizar ahora</button>
                  </form>
              </div>
-        </div>
+        <?php endif; ?>
 
         <?php if ($msg): ?>
             <div class='alert alert-<?php echo $msg_type; ?>'><?php echo htmlspecialchars($msg); ?></div>
@@ -802,43 +851,21 @@ if ($activeDomain && isset($_GET['export'])) {
             rowAdd.scrollIntoView({ behavior: 'smooth' });
         }
 
-        async function checkSync() {
-            try {
-                const activeDomain = "<?php echo addslashes($activeDomain); ?>";
-                const response = await fetch('dns_sync_ajax.php?domain=' + encodeURIComponent(activeDomain));
-                if (!response.ok) return;
-                const data = await response.json();
-                
-                if (data.needed) {
-                    document.getElementById('sync-alert').style.display = 'block';
-                    document.getElementById('sync-message').innerText = data.messages.join(' ');
-                }
-            } catch (e) { console.error("Error al comprobar sincronización:", e); }
-        }
-        
-        // Ejecutar comprobación tras cargar el DOM
-        window.addEventListener('load', () => {
-             checkSync();
-             checkTasks();
-        });
-
         async function checkTasks() {
             try {
                 const response = await fetch('tasks_status.php?t=' + Date.now());
                 if (!response.ok) throw new Error('Network response was not ok');
                 const data = await response.json();
                 const notification = document.getElementById('task-notification');
-                if (notification) {
-                    if (data.pending_count > 0) {
-                        notification.style.display = 'flex';
-                    } else {
-                        notification.style.display = 'none';
-                    }
+                if (data.pending_count > 0) {
+                    notification.style.display = 'flex';
+                } else {
+                    notification.style.display = 'none';
                 }
             } catch (error) { console.error('Error checking tasks:', error); }
         }
         setInterval(checkTasks, 5000);
-
+        checkTasks();
 
         // Cerrar modal al hacer clic fuera
         window.onclick = function(event) {
