@@ -1,6 +1,9 @@
 <?php
 /**
  * Lightweight-Hosting Login Page
+ * 
+ * NOTA: Este archivo debe ser IDENTICO al de Lightweight-DNS/src/admin/login.php.
+ * Si se modifica uno, debe actualizarse el otro para mantener la compatibilidad.
  */
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -149,11 +152,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <input type="hidden" name="redirect" value="<?= htmlspecialchars($redirect) ?>">
         <div class="mb-3">
             <label class="form-label small text-secondary">Usuario</label>
-            <input type="text" name="user" class="form-control" placeholder="admin" required autofocus>
+            <input type="text" id="user" name="user" class="form-control" placeholder="admin" autocomplete="username" required autofocus>
         </div>
         <div class="mb-4">
             <label class="form-label small text-secondary">Contraseña</label>
-            <input type="password" name="pass" class="form-control" placeholder="••••••••" required>
+            <input type="password" id="pass" name="pass" class="form-control" placeholder="••••••••" autocomplete="current-password" required>
         </div>
         <button type="submit" class="btn btn-primary w-100">Iniciar Sesión</button>
     </form>
