@@ -95,13 +95,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg_type = 'success';
             } elseif ($httpCode === 401) {
                 $msg = "❌ Token rechazado (401 Unauthorized).";
+                $msg_type = 'error';
             } elseif ($httpCode === 0) {
                 $msg = "❌ No se pudo conectar al servidor. Verifica la URL.";
+                $msg_type = 'error';
             } else {
                 $msg = "⚠️ Respuesta inesperada del servidor (HTTP $httpCode).";
+                $msg_type = 'warning';
             }
         } else {
             $msg = "Introduce la URL y el token para probar la conexión.";
+            $msg_type = 'error';
+        }
+
+        // Si es AJAX, devolver JSON y salir
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest' || isset($_POST['ajax'])) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => $httpCode === 200, 'message' => $msg, 'type' => $msg_type]);
+            exit;
         }
     }
 
@@ -211,12 +222,10 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                             </div>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                 <!-- Test -->
-                                <form method="POST" style="display: inline;">
-                                    <input type="hidden" name="action" value="test">
-                                    <input type="hidden" name="test_url" value="<?php echo htmlspecialchars($s['url']); ?>">
-                                    <input type="hidden" name="test_token" value="<?php echo htmlspecialchars($s['token']); ?>">
-                                    <button type="submit" class="btn btn-outline btn-sm" title="Probar conexión">🔌 Test</button>
-                                </form>
+                                <button type="button" class="btn btn-outline btn-sm" title="Probar conexión" 
+                                        onclick="testConnectionInline(this, '<?php echo htmlspecialchars($s['url']); ?>', '<?php echo htmlspecialchars($s['token']); ?>')">
+                                    🔌 Test
+                                </button>
                                 <!-- Toggle -->
                                 <form method="POST" style="display: inline;">
                                     <input type="hidden" name="action" value="toggle">
@@ -292,8 +301,10 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
         }
 
         async function testConnection(urlInputId, tokenInputId) {
-            const url = document.getElementById(urlInputId).value.replace(/\/+$/, '');
-            const token = document.getElementById(tokenInputId).value;
+            const urlInput = document.getElementById(urlInputId);
+            const tokenInput = document.getElementById(tokenInputId);
+            const url = urlInput.value.replace(/\/+$/, '');
+            const token = tokenInput.value;
             const resultDiv = document.getElementById('test-result-add');
 
             if (!url || !token) {
@@ -309,17 +320,57 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
             resultDiv.style.color = 'var(--info)';
             resultDiv.textContent = '⏳ Probando conexión...';
 
-            // Use POST form to test via server-side
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.style.display = 'none';
-            form.innerHTML = `
-                <input name="action" value="test">
-                <input name="test_url" value="${url}">
-                <input name="test_token" value="${token}">
-            `;
-            document.body.appendChild(form);
-            form.submit();
+            try {
+                const formData = new FormData();
+                formData.append('action', 'test');
+                formData.append('test_url', url);
+                formData.append('test_token', token);
+                formData.append('ajax', '1');
+
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+
+                const data = await response.json();
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = data.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+                resultDiv.style.color = data.type === 'success' ? 'var(--success)' : 'var(--error)';
+                resultDiv.textContent = data.message;
+            } catch (error) {
+                resultDiv.style.background = 'rgba(239, 68, 68, 0.1)';
+                resultDiv.style.color = 'var(--error)';
+                resultDiv.textContent = '❌ Error de red o del servidor.';
+            }
+        }
+
+        async function testConnectionInline(btn, url, token) {
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '⏳...';
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'test');
+                formData.append('test_url', url);
+                formData.append('test_token', token);
+                formData.append('ajax', '1');
+
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+
+                const data = await response.json();
+                alert(data.message);
+            } catch (error) {
+                alert('❌ Error al probar conexión.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
         }
 
         // Close modal on click outside
