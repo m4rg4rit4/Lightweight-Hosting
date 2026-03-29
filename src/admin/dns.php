@@ -206,6 +206,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = "Error al borrar el registro: " . $detail;
             }
         }
+    elseif ($action === 'reorder_record') {
+        $record_id = (int)$_POST['record_id'];
+        $direction = $_POST['direction']; // 'up' or 'down'
+
+        $res = dnsApiRequest('/api-dns/records/' . urlencode($domain_to_redirect), 'GET');
+        if ($res['code'] === 200) {
+            $data = json_decode($res['response'], true);
+            $recList = $data['records'] ?? [];
+            
+            $targetIndex = -1;
+            foreach ($recList as $index => $r) {
+                if ($r['id'] == $record_id) {
+                    $targetIndex = $index;
+                    break;
+                }
+            }
+
+            if ($targetIndex !== -1) {
+                $adjIndex = ($direction === 'up') ? $targetIndex - 1 : $targetIndex + 1;
+                
+                if (isset($recList[$adjIndex])) {
+                    $targetRec = $recList[$targetIndex];
+                    $adjRec = $recList[$adjIndex];
+
+                    $targetSo = $targetRec['sort_order'] ?? 0;
+                    $adjSo = $adjRec['sort_order'] ?? 0;
+
+                    if ($targetSo == 0 && $adjSo == 0) {
+                        $targetSo = ($targetIndex + 1) * 10;
+                        $adjSo = ($adjIndex + 1) * 10;
+                    }
+
+                    if ($targetSo == $adjSo) {
+                         if ($direction === 'up') {
+                             $targetSo = $adjSo - 5;
+                         } else {
+                             $targetSo = $adjSo + 5;
+                         }
+                    } else {
+                        $temp = $targetSo;
+                        $targetSo = $adjSo;
+                        $adjSo = $temp;
+                    }
+
+                    $count = 0;
+                    foreach ($dnsServers as $server) {
+                        $sUrl = $server['url'];
+                        $sToken = $server['token'];
+
+                        $payload1 = [
+                            'id' => $targetRec['id'],
+                            'name' => $targetRec['name'],
+                            'type' => $targetRec['type'],
+                            'content' => $targetRec['content'],
+                            'ttl' => $targetRec['ttl'],
+                            'priority' => $targetRec['priority'] ?? null,
+                            'sort_order' => $targetSo
+                        ];
+                        
+                        $payload2 = [
+                            'id' => $adjRec['id'],
+                            'name' => $adjRec['name'],
+                            'type' => $adjRec['type'],
+                            'content' => $adjRec['content'],
+                            'ttl' => $adjRec['ttl'],
+                            'priority' => $adjRec['priority'] ?? null,
+                            'sort_order' => $adjSo
+                        ];
+
+                        dnsApiRequestOnServer($sUrl, '/api-dns/record/edit', 'POST', $payload1, $sToken);
+                        dnsApiRequestOnServer($sUrl, '/api-dns/record/edit', 'POST', $payload2, $sToken);
+                        $count++;
+                    }
+
+                    $msg = "Orden actualizado en $count servidor(es) DNS.";
+                    $msg_type = 'success';
+                } else {
+                    $msg = "No se puede mover el registro en esa dirección.";
+                }
+            }
+        }
+    }
         elseif ($action === 'sync_dns') {
             $scope = $_POST['scope'] ?? 'all';
             $domain = $_POST['domain'] ?? '';
@@ -713,7 +795,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php foreach ($records as $r): ?>
+                                        <?php foreach ($records as $index => $r): ?>
                                             <tr>
                                                 <td><span class="type-badge type-<?php echo htmlspecialchars($r['type']); ?>"><?php echo htmlspecialchars($r['type']); ?></span></td>
                                                 <td style="font-weight: 500; font-family: monospace; color: var(--text);"><?php echo htmlspecialchars($r['name']); ?></td>
@@ -721,6 +803,22 @@ if ($activeDomain && isset($_GET['export'])) {
                                                 <td style="color: var(--text-dim); font-size: 0.8rem;"><?php echo $r['ttl']; ?>s</td>
                                                  <td style="text-align: right;">
                                                     <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                                        <?php if ($index > 0): ?>
+                                                        <form method="POST" style="margin:0;">
+                                                            <input type="hidden" name="action" value="reorder_record">
+                                                            <input type="hidden" name="record_id" value="<?php echo $r['id']; ?>">
+                                                            <input type="hidden" name="direction" value="up">
+                                                            <button type="submit" class="btn btn-outline" style="padding: 6px; border-radius: 6px;" title="Subir">↑</button>
+                                                        </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($index < count($records) - 1): ?>
+                                                        <form method="POST" style="margin:0;">
+                                                            <input type="hidden" name="action" value="reorder_record">
+                                                            <input type="hidden" name="record_id" value="<?php echo $r['id']; ?>">
+                                                            <input type="hidden" name="direction" value="down">
+                                                            <button type="submit" class="btn btn-outline" style="padding: 6px; border-radius: 6px;" title="Bajar">↓</button>
+                                                        </form>
+                                                        <?php endif; ?>
                                                         <button type="button" class="btn btn-outline" style="padding: 6px; border-radius: 6px;" title="Editar Registro" 
                                                             onclick="editRecord(<?php echo htmlspecialchars(json_encode($r)); ?>)">
                                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
