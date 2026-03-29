@@ -38,8 +38,14 @@ if (empty($php_socket) || !file_exists($php_socket)) {
     $php_socket = !empty($found_any) ? $found_any[0] : "/run/php/php8.2-fpm.sock";
 }
 
-require '/var/www/admin_panel/config.php';
-require_once '/var/www/admin_panel/dns_utils.php';
+// Support both production and local development paths
+if (file_exists('/var/www/admin_panel/config.php')) {
+    require '/var/www/admin_panel/config.php';
+    require_once '/var/www/admin_panel/dns_utils.php';
+} else {
+    require_once __DIR__ . '/../admin/config.php';
+    require_once __DIR__ . '/../admin/dns_utils.php';
+}
 
 try {
     $pdo = getPDO();
@@ -236,6 +242,7 @@ try {
     $pdo->exec("ALTER TABLE sys_dns_servers ADD COLUMN IF NOT EXISTS last_sync_check DATETIME");
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS dns_sync_status VARCHAR(100) DEFAULT 'ok'");
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS dns_last_sync DATETIME");
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS backup_frequency ENUM('none', 'daily', 'weekly') DEFAULT 'none'");
 
 } catch (Exception $e) {
     // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root

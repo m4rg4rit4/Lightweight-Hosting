@@ -5,7 +5,12 @@
  * Designed to be run daily via cron.
  */
 
-require '/var/www/admin_panel/config.php';
+// Support both production and local development paths
+if (file_exists('/var/www/admin_panel/config.php')) {
+    require '/var/www/admin_panel/config.php';
+} else {
+    require_once __DIR__ . '/../admin/config.php';
+}
 
 try {
     $pdo = getPDO();
@@ -27,6 +32,13 @@ if ($megaStatus !== 'logged_in') {
 // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 $isSunday = (date('w') == 0);
 
+// Check if backup_frequency column exists to avoid 500 error if migration hasn't run
+$checkColumn = $pdo->query("SHOW COLUMNS FROM sys_sites LIKE 'backup_frequency'")->fetch();
+if (!$checkColumn) {
+    echo "Column 'backup_frequency' does not exist yet. Aborting auto-backup.\n";
+    exit(0);
+}
+
 // We want sites where backup_frequency is 'daily', OR 'weekly' if today is Sunday
 $query = "SELECT id, domain FROM sys_sites WHERE status = 'active' AND (backup_frequency = 'daily'";
 if ($isSunday) {
@@ -39,7 +51,7 @@ $stmt->execute();
 $sites = $stmt->fetchAll();
 
 if (empty($sites)) {
-    echo "No active sites found. Aborting auto-backup.\n";
+    echo "No active sites found for today's backup schedule. Aborting auto-backup.\n";
     exit(0);
 }
 

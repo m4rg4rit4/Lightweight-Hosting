@@ -41,9 +41,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $siteId = (int)$_POST['site_id'];
                 $freq = $_POST['frequency'] ?? 'none';
                 if (in_array($freq, ['none', 'daily', 'weekly'])) {
-                    $pdo->prepare("UPDATE sys_sites SET backup_frequency = ? WHERE id = ?")->execute([$freq, $siteId]);
-                    $msg = "Frecuencia de copia actualizada.";
-                    $msg_type = 'success';
+                    try {
+                        $pdo->prepare("UPDATE sys_sites SET backup_frequency = ? WHERE id = ?")->execute([$freq, $siteId]);
+                        $msg = "Frecuencia de copia actualizada.";
+                        $msg_type = 'success';
+                    } catch (Exception $e) {
+                        $msg = "Error: Es posible que falte la columna 'backup_frequency' en la tabla 'sys_sites'. El motor de tareas la creará automáticamente en su próxima ejecución, o puedes revisar el archivo install.sh.";
+                        $msg_type = 'error';
+                    }
                 }
                 break;
             case 'backup_now':
