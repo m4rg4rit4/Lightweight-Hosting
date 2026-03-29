@@ -25,7 +25,7 @@ fi
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION="1.1.7"
+    VERSION="1.4.9"
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
