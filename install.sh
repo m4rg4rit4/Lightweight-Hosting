@@ -14,12 +14,34 @@ NC='\033[0m' # No Color
 
 printf "${GREEN}Iniciando instalación ultra-ligera del sistema de hosting...${NC}\n"
 
-# Detección de flag /update para instalación no interactiva
-AUTO_UPDATE=false
-if echo "$*" | grep -q "/update"; then
+if echo "$*" | grep -qE "/update|/silent"; then
     AUTO_UPDATE=true
     printf "${YELLOW}Modo NO INTERACTIVO activado (/update)${NC}\n"
 fi
+
+# Función de limpieza de variables
+sanitize_var() {
+    echo "$1" | tr -d '[:space:]\r\n' | sed -E 's|^//.*||; s|^#.*||'
+}
+
+# Función para prompts interactivos (compatible con curl | bash)
+ask_input() {
+    local prompt=$1
+    local default=$2
+    local var_name=$3
+    local val=""
+    
+    if [ "$AUTO_UPDATE" = false ]; then
+        if [ ! -t 0 ]; then
+            read -p "$prompt" val < /dev/tty
+        else
+            read -p "$prompt" val
+        fi
+    fi
+    
+    val=${val:-$default}
+    eval "$var_name=\"$val\""
+}
 
 # Obtener versión local
 if [ -f "VERSION" ]; then
@@ -41,13 +63,8 @@ fi
 # 2. Configuración de Hostname y FQDN
 printf "${YELLOW}Configuración del Hostname y Dominio${NC}\n"
 CURRENT_FQDN=$(hostname -f 2>/dev/null || hostname)
-if [ "$AUTO_UPDATE" = true ]; then
-    FULL_FQDN=${FULL_FQDN:-$CURRENT_FQDN}
-    printf "${YELLOW}Usando FQDN: ${NC}${GREEN}$FULL_FQDN${NC}\n"
-else
-    read -p "Introduce el FQDN completo [$CURRENT_FQDN]: " FULL_FQDN
-    FULL_FQDN=${FULL_FQDN:-$CURRENT_FQDN}
-fi
+ask_input "Introduce el FQDN completo [$CURRENT_FQDN]: " "$CURRENT_FQDN" "FULL_FQDN"
+FULL_FQDN=$(sanitize_var "$FULL_FQDN")
 
 if [ -z "$FULL_FQDN" ]; then
     printf "${RED}El FQDN no puede estar vacío. Abortando.${NC}\n"
@@ -55,13 +72,9 @@ if [ -z "$FULL_FQDN" ]; then
 fi
 
 printf "${YELLOW}Configuración del Email del Administrador (para Let's Encrypt)${NC}\n"
-if [ "$AUTO_UPDATE" = true ]; then
-    ADMIN_EMAIL=${ADMIN_EMAIL:-"admin@$FULL_FQDN"}
-    printf "${YELLOW}Usando Email: ${NC}${GREEN}$ADMIN_EMAIL${NC}\n"
-else
-    read -p "Introduce el email del administrador [${ADMIN_EMAIL:-admin@$FULL_FQDN}]: " NEW_EMAIL
-    ADMIN_EMAIL=${NEW_EMAIL:-${ADMIN_EMAIL:-admin@$FULL_FQDN}}
-fi
+DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$FULL_FQDN"}
+ask_input "Introduce el email del administrador [$DEFAULT_EMAIL]: " "$DEFAULT_EMAIL" "ADMIN_EMAIL"
+ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
 
 if [ -z "$ADMIN_EMAIL" ]; then
     printf "${RED}El email no puede estar vacío. Abortando.${NC}\n"
@@ -401,15 +414,15 @@ TEMP_DIR=$(mktemp -d /tmp/hosting_XXXXXX)
 # Asegurar que los directorios finales existen
 mkdir -p "$ADMIN_PATH" "$ENGINE_PATH"
 
-# Prompts para Credenciales del Panel (siempre preguntar)
+# Prompts para Credenciales del Panel (siempre preguntar solo en modo manual)
 printf "${YELLOW}Configuración de Credenciales del Panel${NC}\n"
 DEFAULT_USER=${EXISTING_ADMIN_USER:-"admin"}
-read -p "Introduce el USUARIO de administración [$DEFAULT_USER]: " ADMIN_USER
-ADMIN_USER=${ADMIN_USER:-$DEFAULT_USER}
+ask_input "Introduce el USUARIO de administración [$DEFAULT_USER]: " "$DEFAULT_USER" "ADMIN_USER"
+ADMIN_USER=$(sanitize_var "$ADMIN_USER")
 
 DEFAULT_PASS=${EXISTING_ADMIN_PASS:-$(openssl rand -base64 12)}
-read -p "Introduce la CONTRASEÑA de administración [$DEFAULT_PASS]: " ADMIN_PASS
-ADMIN_PASS=${ADMIN_PASS:-$DEFAULT_PASS}
+ask_input "Introduce la CONTRASEÑA de administración [$DEFAULT_PASS]: " "$DEFAULT_PASS" "ADMIN_PASS"
+ADMIN_PASS=$(sanitize_var "$ADMIN_PASS")
 
 # Definir URL base para archivos raw
 REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
@@ -482,18 +495,16 @@ fi
 # Inyectar configuración dinámica (respetando lo existente si es update)
 # Preguntar por el gestor de base de datos
 CURRENT_MANAGER=${EXISTING_DB_MANAGER:-"phpmyadmin"}
-if [ "$AUTO_UPDATE" = true ]; then
-    DB_MANAGER_OPT="1" # Por defecto phpMyAdmin en updates automáticos si no se especifica
-    # Si ya existía uno, lo respetamos
-    if [ "$CURRENT_MANAGER" = "dbadmin" ]; then
-        DB_MANAGER_OPT="2"
-    fi
-    printf "${YELLOW}Usando Gestor de BD: ${NC}${GREEN}$CURRENT_MANAGER${NC}\n"
-else
+DB_MANAGER_OPT="1"
+if [ "$CURRENT_MANAGER" = "dbadmin" ]; then
+    DB_MANAGER_OPT="2"
+fi
+
+if [ "$AUTO_UPDATE" = false ]; then
     printf "${YELLOW}Selecciona el Gestor de Base de Datos [Actual: $CURRENT_MANAGER]:${NC}\n"
     printf "1) phpMyAdmin (Completo, más pesado)\n"
     printf "2) Adminer (Ligero, un solo archivo)\n"
-    read -p "Opción [1-2]: " DB_MANAGER_OPT
+    ask_input "Opción [1-2] (Enter para no cambiar): " "$DB_MANAGER_OPT" "DB_MANAGER_OPT"
 fi
 
 if [ "$DB_MANAGER_OPT" = "2" ]; then
