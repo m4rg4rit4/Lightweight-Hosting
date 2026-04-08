@@ -315,6 +315,9 @@ foreach ($tasks as $task) {
 
             // --- Sincronizar DNS ---
             syncDnsRecord('add', $domain);
+            syncDnsRecord('add', "www.$domain");
+            syncDnsRecord('add', "pma.$domain");
+            syncDnsRecord('add', "phpmyadmin.$domain");
 
             // --- Auto-encolar SSL ---
             $publicIP = getPublicIP();
