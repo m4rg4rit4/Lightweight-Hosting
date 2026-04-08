@@ -47,7 +47,7 @@ ask_input() {
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION="1.4.9"
+    VERSION="1.4.10"
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
@@ -448,6 +448,7 @@ curl -sSL "$REPO_RAW/src/engine/certbot_dns_cleanup.php" -o "$TEMP_DIR/certbot_d
 curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
 curl -sSL "$REPO_RAW/src/engine/sync_monitor.sh" -o "$TEMP_DIR/sync_monitor.sh"
 curl -sSL "$REPO_RAW/src/engine/auto_backup.php" -o "$TEMP_DIR/auto_backup.php"
+curl -sSL "$REPO_RAW/autoupdate.sh" -o "$TEMP_DIR/autoupdate.sh"
 curl -sSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh"
 
 if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks.php" ] || [ ! -f "$TEMP_DIR/tasks_status.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
@@ -478,6 +479,8 @@ chmod +x "$ENGINE_PATH/certbot_dns_auth.php" "$ENGINE_PATH/certbot_dns_cleanup.p
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
 cp "$TEMP_DIR/sync_monitor.sh" "$ENGINE_PATH/sync_monitor.sh"
 cp "$TEMP_DIR/auto_backup.php" "$ENGINE_PATH/auto_backup.php"
+cp "$TEMP_DIR/autoupdate.sh" "$ENGINE_PATH/autoupdate.sh"
+chmod +x "$ENGINE_PATH/autoupdate.sh"
 cp "$TEMP_DIR/installadmin.sh" "./installadmin.sh"
 chmod +x ./installadmin.sh
 
@@ -735,6 +738,14 @@ if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/auto_backup.php"; then
 else
     (crontab -l 2>/dev/null; echo "0 3 * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /usr/bin/php $ENGINE_PATH/auto_backup.php >> /var/log/hosting_backup.log 2>&1") | crontab -
     printf "${GREEN}Cronjob de auto_backup añadido con éxito (Diariamente a las 03:00).${NC}\n"
+fi
+
+# Configurar Autoupdate (Diariamente a las 03:00)
+if crontab -l 2>/dev/null | grep -q "$ENGINE_PATH/autoupdate.sh"; then
+    printf "${GREEN}El cronjob de autoupdate ya está configurado. Saltando.${NC}\n"
+else
+    (crontab -l 2>/dev/null; echo "0 3 * * * PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin /bin/bash $ENGINE_PATH/autoupdate.sh >> /var/log/hosting_autoupdate.log 2>&1") | crontab -
+    printf "${GREEN}Cronjob de autoupdate añadido con éxito (Diariamente a las 03:00).${NC}\n"
 fi
 
 # 14. Limpieza final de DISCO
