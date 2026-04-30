@@ -12,11 +12,31 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-printf "${GREEN}Iniciando instalación ultra-ligera del sistema de hosting...${NC}\n"
+# Inicialización de variables
+AUTO_UPDATE=false
+FORCE_SILENT=false
+ADMIN_PATH="/var/www/admin_panel"
+ENGINE_PATH="/usr/local/bin/hosting"
 
-if echo "$*" | grep -qE "/update|/silent"; then
+# Detectar banderas
+if echo "$*" | grep -q "/silent"; then
+    FORCE_SILENT=true
     AUTO_UPDATE=true
-    printf "${YELLOW}Modo NO INTERACTIVO activado (/update)${NC}\n"
+    printf "${YELLOW}Modo SILENCIOSO activado (/silent)${NC}\n"
+fi
+
+if echo "$*" | grep -q "/update"; then
+    if [ -f "$ADMIN_PATH/config.php" ]; then
+        AUTO_UPDATE=true
+        printf "${YELLOW}Modo ACTUALIZACIÓN activado. Se usarán datos existentes.${NC}\n"
+    else
+        printf "${YELLOW}Aviso: Se solicitó /update pero no existe configuración previa. Iniciando modo interactivo.${NC}\n"
+    fi
+fi
+
+if echo "$*" | grep -q "/config"; then
+    AUTO_UPDATE=false
+    printf "${YELLOW}Modo CONFIGURACIÓN forzado (/config)${NC}\n"
 fi
 
 # Función de limpieza de variables
@@ -54,15 +74,37 @@ printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 # Autocuración: Eliminar posibles configs corruptas de intentos previos
 rm -f /etc/apt/apt.conf.d/01lean /etc/dpkg/dpkg.cfg.d/01lean
 
-# 1. Verificación de usuario root
+# 1. Verificación de usuario root e integridad previa
 if [ "$(id -u)" -ne 0 ]; then 
     printf "${RED}Por favor, ejecuta como root${NC}\n"
     exit 1
 fi
 
+# Intentar recuperar configuración existente si es una actualización
+EXISTING_CONFIG="$ADMIN_PATH/config.php"
+ROOT_DB_PASS_FILE="/root/.hosting_db_root"
+IS_UPDATE=false
+
+if [ -f "$EXISTING_CONFIG" ]; then
+    IS_UPDATE=true
+    # Cargar variables actuales para usarlas como defaults
+    EXISTING_ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_ADMIN_USER=$(grep "'ADMIN_USER'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_ADMIN_PASS=$(grep "'ADMIN_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_DB_MANAGER=$(grep "'DB_MANAGER_DIR'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    
+    # DNS Reconstruir FQDN si es posible
+    EXISTING_HOSTNAME=$(grep "'DNS_HOSTNAME'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_DOMAIN=$(grep "'DNS_DOMAIN'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    if [ ! -z "$EXISTING_HOSTNAME" ] && [ ! -z "$EXISTING_DOMAIN" ]; then
+        CURRENT_FQDN="$EXISTING_HOSTNAME.$EXISTING_DOMAIN"
+    fi
+fi
+
 # 2. Configuración de Hostname y FQDN
 printf "${YELLOW}Configuración del Hostname y Dominio${NC}\n"
-CURRENT_FQDN=$(hostname -f 2>/dev/null || hostname)
+CURRENT_FQDN=${CURRENT_FQDN:-$(hostname -f 2>/dev/null || hostname)}
 ask_input "Introduce el FQDN completo [$CURRENT_FQDN]: " "$CURRENT_FQDN" "FULL_FQDN"
 FULL_FQDN=$(sanitize_var "$FULL_FQDN")
 
@@ -72,7 +114,7 @@ if [ -z "$FULL_FQDN" ]; then
 fi
 
 printf "${YELLOW}Configuración del Email del Administrador (para Let's Encrypt)${NC}\n"
-DEFAULT_EMAIL=${ADMIN_EMAIL:-"admin@$FULL_FQDN"}
+DEFAULT_EMAIL=${EXISTING_ADMIN_EMAIL:-"admin@$FULL_FQDN"}
 ask_input "Introduce el email del administrador [$DEFAULT_EMAIL]: " "$DEFAULT_EMAIL" "ADMIN_EMAIL"
 ADMIN_EMAIL=$(sanitize_var "$ADMIN_EMAIL")
 
@@ -213,35 +255,6 @@ fi
 printf "${YELLOW}Instalando MariaDB...${NC}\n"
 apt install -y mariadb-server || { printf "${RED}Error al instalar MariaDB.${NC}\n"; exit 1; }
 
-# Definir rutas antes de usarlas
-ADMIN_PATH="/var/www/admin_panel"
-ENGINE_PATH="/usr/local/bin/hosting"
-
-# Intentar recuperar configuración existente si es una actualización
-EXISTING_CONFIG="$ADMIN_PATH/config.php"
-ROOT_DB_PASS_FILE="/root/.hosting_db_root"
-IS_UPDATE=false
-
-if [ -f "$EXISTING_CONFIG" ]; then
-    printf "${GREEN}Detectada instalación existente. Cargando configuración...${NC}\n"
-    EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
-    EXISTING_ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$EXISTING_CONFIG" | cut -d"'" -f4)
-    EXISTING_ADMIN_USER=$(grep "'ADMIN_USER'" "$EXISTING_CONFIG" | cut -d"'" -f4)
-    EXISTING_ADMIN_PASS=$(grep "'ADMIN_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
-    EXISTING_DB_MANAGER=$(grep "'DB_MANAGER_DIR'" "$EXISTING_CONFIG" | cut -d"'" -f4)
-    # Extraer variables de DNS (pueden estar comentadas o no)
-    EXISTING_DNS_TOKEN=$(grep "DNS_TOKEN" "$EXISTING_CONFIG" | sed -E "s/.*'DNS_TOKEN', '([^']*)'.*/\1/")
-    EXISTING_DNS_SERVER=$(grep "DNS_SERVER" "$EXISTING_CONFIG" | sed -E "s/.*'DNS_SERVER', '([^']*)'.*/\1/")
-    
-    if [ ! -z "$EXISTING_DB_PASS" ]; then
-        DB_ADMIN_PASS="$EXISTING_DB_PASS"
-        IS_UPDATE=true
-    fi
-    if [ ! -z "$EXISTING_ADMIN_EMAIL" ]; then
-        ADMIN_EMAIL="$EXISTING_ADMIN_EMAIL"
-    fi
-fi
-
 # Recuperar o generar contraseña de Root de MariaDB
 if [ -f "$ROOT_DB_PASS_FILE" ]; then
     DB_ROOT_PASS=$(cat "$ROOT_DB_PASS_FILE")
@@ -250,6 +263,17 @@ else
     DB_ROOT_PASS=$(openssl rand -base64 24)
     echo "$DB_ROOT_PASS" > "$ROOT_DB_PASS_FILE"
     chmod 600 "$ROOT_DB_PASS_FILE"
+fi
+
+if [ "$IS_UPDATE" = true ]; then
+    printf "${GREEN}Detectada instalación existente. Cargando parámetros de base de datos...${NC}\n"
+    # Extraer variables de DNS (pueden estar comentadas o no)
+    EXISTING_DNS_TOKEN=$(grep "DNS_TOKEN" "$EXISTING_CONFIG" | sed -E "s/.*'DNS_TOKEN', '([^']*)'.*/\1/")
+    EXISTING_DNS_SERVER=$(grep "DNS_SERVER" "$EXISTING_CONFIG" | sed -E "s/.*'DNS_SERVER', '([^']*)'.*/\1/")
+    
+    if [ ! -z "$EXISTING_DB_PASS" ]; then
+        DB_ADMIN_PASS="$EXISTING_DB_PASS"
+    fi
 fi
 
 # Optimización MariaDB para 1GB RAM
