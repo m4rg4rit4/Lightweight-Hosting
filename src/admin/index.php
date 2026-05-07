@@ -372,36 +372,13 @@ if (hasDnsServers()) {
             if (inputDomain.value) inputDomain.dispatchEvent(new Event('input'));
         });
 
-        async function checkTasks() {
-            try {
-                const response = await fetch('tasks_status.php?t=' + Date.now());
-                if (!response.ok) throw new Error('Network response was not ok');
-                
-                const data = await response.json();
-                const currentCount = data.pending_count;
-
-                const notification = document.getElementById('task-notification');
-                if (currentCount > 0) {
-                    notification.style.display = 'flex';
-                } else {
-                    notification.style.display = 'none';
-                }
-
-                // Si antes había tareas y ahora no, refrescamos con un GET limpio para mostrar los cambios
-                if (lastPendingCount > 0 && currentCount === 0) {
-                    window.location.href = window.location.pathname;
-                }
-                
-                lastPendingCount = currentCount;
-            } catch (error) {
-                console.error('Error checking tasks:', error);
+        let lastPendingCount = -1;
+        window.onTasksChecked = function(currentCount) {
+            if (lastPendingCount > 0 && currentCount === 0) {
+                window.location.href = window.location.pathname;
             }
-        }
-
-        // Comprobar cada 30 segundos
-        setInterval(checkTasks, 30000);
-        // Comprobación inicial
-        checkTasks();
+            lastPendingCount = currentCount;
+        };
     </script>
 </body>
 </html>

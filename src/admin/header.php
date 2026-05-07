@@ -54,3 +54,32 @@ checkAuth();
         <span class="pending-text">TAREAS PENDIENTES</span>
     </a>
 </nav>
+<script>
+async function checkTasks() {
+    try {
+        const response = await fetch('tasks_status.php?t=' + Date.now());
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const data = await response.json();
+        const notification = document.getElementById('task-notification');
+        if (notification) {
+            if (data.pending_count > 0) {
+                notification.style.display = 'flex';
+            } else {
+                notification.style.display = 'none';
+            }
+        }
+        
+        if (typeof window.onTasksChecked === 'function') {
+            window.onTasksChecked(data.pending_count);
+        }
+        
+        return data.pending_count;
+    } catch (error) {
+        console.error('Error checking tasks:', error);
+        return 0;
+    }
+}
+setInterval(checkTasks, 10000);
+checkTasks();
+</script>

@@ -215,21 +215,6 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50"
     </div>
 
     <script>
-        async function checkTasks() {
-            try {
-                const response = await fetch('tasks_status.php?t=' + Date.now());
-                if (!response.ok) throw new Error('Network response was not ok');
-                const data = await response.json();
-                const notification = document.getElementById('task-notification');
-                if (data.pending_count > 0) {
-                    notification.style.display = 'flex';
-                } else {
-                    notification.style.display = 'none';
-                }
-            } catch (error) { console.error('Error checking tasks:', error); }
-        }
-        setInterval(checkTasks, 30000);
-        checkTasks();
     </script>
 </body>
 </html>
