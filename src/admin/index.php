@@ -120,7 +120,7 @@ $sites = $pdo->query("
     SELECT s.*, 
     (SELECT COUNT(*) FROM sys_tasks t 
      WHERE t.status IN ('pending', 'running') 
-     AND (JSON_EXTRACT(t.payload, '$.domain') = s.domain OR JSON_EXTRACT(t.payload, '$.domain') = CONCAT('\"', s.domain, '\"'))) as is_processing
+     AND JSON_UNQUOTE(JSON_EXTRACT(t.payload, '$.domain')) = s.domain) as is_processing
     FROM sys_sites s 
     ORDER BY s.id ASC
 ")->fetchAll();
@@ -372,7 +372,6 @@ if (hasDnsServers()) {
             if (inputDomain.value) inputDomain.dispatchEvent(new Event('input'));
         });
 
-        let lastPendingCount = -1;
         window.onTasksChecked = function(currentCount) {
             if (lastPendingCount > 0 && currentCount === 0) {
                 window.location.href = window.location.pathname;

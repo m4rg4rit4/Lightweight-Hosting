@@ -18,20 +18,24 @@ try {
     
     // 2. Tareas remotas del DNS
     $dnsCount = 0;
-    $servers = getDnsServers();
-    foreach ($servers as $server) {
-        $res = dnsApiRequestOnServer($server['url'], '/api-dns/status/pending', 'GET', null, $server['token']);
-        if ($res['code'] === 200) {
-            $data = json_decode($res['response'], true);
-            if ($data && isset($data['pending_count'])) {
-                $dnsCount += (int)$data['pending_count'];
+    try {
+        $servers = getDnsServers();
+        foreach ($servers as $server) {
+            $res = dnsApiRequestOnServer($server['url'], '/api-dns/status/pending', 'GET', null, $server['token']);
+            if (is_array($res) && isset($res['code']) && $res['code'] === 200) {
+                $data = json_decode($res['response'], true);
+                if ($data && isset($data['pending_count'])) {
+                    $dnsCount += (int)$data['pending_count'];
+                }
             }
         }
+    } catch (Exception $e) {
+        // Ignorar errores de DNS para no bloquear el panel si un nodo falla
     }
     
     echo json_encode(['pending_count' => $localCount + $dnsCount]);
 } catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    // En caso de error crítico (BD local), devolvemos 0 en lugar de romper el dashboard
+    echo json_encode(['pending_count' => 0, 'error' => $e->getMessage()]);
 }
 ?>

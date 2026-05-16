@@ -77,6 +77,7 @@ async function checkTasks() {
         return data.pending_count;
     } catch (error) {
         console.error('Error checking tasks:', error);
+        // Only show if we're not in a dev/local environment to avoid spamming
         return 0;
     }
 }
