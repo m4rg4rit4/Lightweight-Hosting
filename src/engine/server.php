@@ -313,11 +313,11 @@ foreach ($tasks as $task) {
             $msg = "Site $domain created.";
             $success = true;
 
-            // --- Sincronizar DNS ---
-            syncDnsRecord('add', $domain);
-            syncDnsRecord('add', "www.$domain");
-            syncDnsRecord('add', "pma.$domain");
-            syncDnsRecord('add', "phpmyadmin.$domain");
+            // --- Sincronizar DNS (Desactivado por petición del usuario) ---
+            // syncDnsRecord('add', $domain);
+            // syncDnsRecord('add', "www.$domain");
+            // syncDnsRecord('add', "pma.$domain");
+            // syncDnsRecord('add', "phpmyadmin.$domain");
 
             // --- Auto-encolar SSL ---
             $publicIP = getPublicIP();
@@ -546,8 +546,8 @@ foreach ($tasks as $task) {
             
             $pdo->prepare("DELETE FROM sys_sites WHERE domain = ?")->execute([$domain]);
             
-            // --- Limpiar DNS ---
-            syncDnsRecord('del', $domain);
+            // --- Limpiar DNS (Desactivado por petición del usuario) ---
+            // syncDnsRecord('del', $domain);
             
             // 4. Limpiar bases de datos asociadas
             $dbs = $pdo->prepare("SELECT db_name, db_user FROM sys_databases WHERE site_id = ?");
@@ -779,9 +779,10 @@ foreach ($tasks as $task) {
             $domain = $siteData['domain'];
             $docRoot = $siteData['document_root'];
             
-            $dbs = $pdo->prepare("SELECT db_name, db_user, db_pass FROM sys_databases WHERE site_id = ?");
-            $dbs->execute([$siteId]);
-            $dbData = $dbs->fetch();
+            // Obtener TODAS las bases de datos asociadas al sitio
+            $stmtDbs = $pdo->prepare("SELECT db_name, db_user, db_pass FROM sys_databases WHERE site_id = ?");
+            $stmtDbs->execute([$siteId]);
+            $associatedDbs = $stmtDbs->fetchAll();
             
             $timestamp = date('Ymd_His');
             $backupFile = "backup_{$domain}_{$timestamp}.tar.gz";
@@ -793,35 +794,44 @@ foreach ($tasks as $task) {
             $config = [
                 'domain' => $domain,
                 'document_root' => $docRoot,
-                'timestamp' => $timestamp
+                'timestamp' => $timestamp,
+                'databases' => [] // Nuevo array para múltiples DBs
             ];
             
-            if ($dbData) {
-                $config['db_name'] = $dbData['db_name'];
-                $config['db_user'] = $dbData['db_user'];
-                $config['db_pass'] = $dbData['db_pass'];
+            $dbFiles = [];
+            if (!empty($associatedDbs)) {
+                $dbDir = "$tmpDir/databases";
+                mkdir($dbDir, 0755, true);
                 
                 $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
                 $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
-                $dbNameArg = escapeshellarg($dbData['db_name']);
-                
-                // Using mariadb-dump (or mysqldump for compatibility)
-                if (file_exists('/usr/bin/mariadb-dump')) {
-                    shell_exec("mariadb-dump $auth {$dbNameArg} | gzip > {$tmpDir}/database.sql.gz");
-                } else {
-                    shell_exec("mysqldump $auth {$dbNameArg} | gzip > {$tmpDir}/database.sql.gz");
+                $dumpBin = file_exists('/usr/bin/mariadb-dump') ? '/usr/bin/mariadb-dump' : '/usr/bin/mysqldump';
+
+                foreach ($associatedDbs as $db) {
+                    $dbNameArg = escapeshellarg($db['db_name']);
+                    $safeFile = "{$db['db_name']}.sql.gz";
+                    shell_exec("$dumpBin $auth {$dbNameArg} | gzip > {$dbDir}/{$safeFile}");
+                    
+                    $config['databases'][] = [
+                        'db_name' => $db['db_name'],
+                        'db_user' => $db['db_user'],
+                        'db_pass' => $db['db_pass']
+                    ];
+                    $dbFiles[] = "databases/{$safeFile}";
                 }
             }
             
             file_put_contents("$tmpDir/config.json", json_encode($config, JSON_PRETTY_PRINT));
             
-            // Symlink to save space during tar (dereference with -h)
+            // Simlink para ahorrar espacio durante el tar (dereference con -h)
             symlink($docRoot, "$tmpDir/webroot");
             
-            $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json webroot";
-            if (file_exists("$tmpDir/database.sql.gz")) {
-                $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " config.json database.sql.gz webroot";
+            $itemsToTar = "config.json webroot";
+            if (!empty($dbFiles)) {
+                $itemsToTar .= " databases/";
             }
+            
+            $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " $itemsToTar";
             shell_exec($tarCmd);
             
             $megaPath = "/Backups/{$domain}";
@@ -831,7 +841,7 @@ foreach ($tasks as $task) {
             if ($resMega === 0 || strpos(implode(" ", $outMega), 'uploaded') !== false) {
                 $pdo->prepare("INSERT INTO sys_backups (site_id, filename, mega_path, status) VALUES (?, ?, ?, 'completed')")
                     ->execute([$siteId, $backupFile, $megaPath]);
-                $msg = "Backup $backupFile uploaded completely.";
+                $msg = "Backup $backupFile uploaded completely (included " . count($associatedDbs) . " DBs).";
                 $success = true;
             } else {
                 $msg = "MEGA upload failed: " . implode(" ", $outMega);
@@ -841,7 +851,7 @@ foreach ($tasks as $task) {
             shell_exec("rm -rf " . escapeshellarg($tmpDir));
             @unlink($tmpTar);
             
-            // Retention
+            // Retención
             $retention = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'backup_retention_days'")->fetchColumn();
             if ($retention && is_numeric($retention)) {
                 $oldBackups = $pdo->prepare("SELECT id, filename, mega_path FROM sys_backups WHERE site_id = ? AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
@@ -893,15 +903,59 @@ foreach ($tasks as $task) {
             mkdir($tmpDir, 0755, true);
             shell_exec("tar -xzf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir));
             
-            if (file_exists("$tmpDir/database.sql.gz")) {
+            $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+            $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+            
+            // 1. Restauración Multi-DB (Nuevo Formato)
+            if (is_dir("$tmpDir/databases")) {
+                $configPath = "$tmpDir/config.json";
+                if (file_exists($configPath)) {
+                    $configData = json_decode(file_get_contents($configPath), true);
+                    $dbsToRestore = $configData['databases'] ?? [];
+                    
+                    foreach ($dbsToRestore as $db) {
+                        $dbName = $db['db_name'];
+                        $dbUser = $db['db_user'];
+                        $dbPass = $db['db_pass'];
+                        $dbFile = "$tmpDir/databases/{$dbName}.sql.gz";
+                        
+                        if (file_exists($dbFile)) {
+                            $dbNameArg = escapeshellarg($dbName);
+                            $dbUserArg = escapeshellarg($dbUser);
+                            $dbPassArg = escapeshellarg($dbPass);
+                            
+                            // Asegurar que la DB y el Usuario existan
+                            shell_exec("mariadb $auth -e \"CREATE DATABASE IF NOT EXISTS $dbNameArg;\"");
+                            shell_exec("mariadb $auth -e \"CREATE USER IF NOT EXISTS '$dbUserArg'@'127.0.0.1' IDENTIFIED BY '$dbPassArg';\"");
+                            shell_exec("mariadb $auth -e \"GRANT ALL PRIVILEGES ON $dbNameArg.* TO '$dbUserArg'@'127.0.0.1';\"");
+                            shell_exec("mariadb $auth -e \"CREATE USER IF NOT EXISTS '$dbUserArg'@'localhost' IDENTIFIED BY '$dbPassArg';\"");
+                            shell_exec("mariadb $auth -e \"GRANT ALL PRIVILEGES ON $dbNameArg.* TO '$dbUserArg'@'localhost';\"");
+                            shell_exec("mariadb $auth -e \"FLUSH PRIVILEGES;\"");
+                            
+                            // Restaurar datos
+                            shell_exec("zcat " . escapeshellarg($dbFile) . " | mariadb $auth $dbNameArg");
+                            
+                            // Asegurar que sys_databases esté sincronizado localmente
+                            $stmtCheck = $pdo->prepare("SELECT id FROM sys_databases WHERE db_name = ?");
+                            $stmtCheck->execute([$dbName]);
+                            if (!$stmtCheck->fetch()) {
+                                $pdo->prepare("INSERT INTO sys_databases (site_id, db_name, db_user, db_pass) VALUES (?, ?, ?, ?)")
+                                    ->execute([$siteId, $dbName, $dbUser, $dbPass]);
+                            } else {
+                                $pdo->prepare("UPDATE sys_databases SET site_id = ?, db_user = ?, db_pass = ? WHERE db_name = ?")
+                                    ->execute([$siteId, $dbUser, $dbPass, $dbName]);
+                            }
+                        }
+                    }
+                }
+            } 
+            // 2. Restauración Legacy (Un solo archivo database.sql.gz en la raíz)
+            elseif (file_exists("$tmpDir/database.sql.gz")) {
                 $dbs = $pdo->prepare("SELECT db_name FROM sys_databases WHERE site_id = ?");
                 $dbs->execute([$siteId]);
                 $dbData = $dbs->fetch();
                 if ($dbData) {
-                    $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
-                    $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
                     $dbNameArg = escapeshellarg($dbData['db_name']);
-                    
                     shell_exec("mariadb $auth -e \"DROP DATABASE IF EXISTS $dbNameArg; CREATE DATABASE $dbNameArg;\"");
                     shell_exec("zcat " . escapeshellarg("$tmpDir/database.sql.gz") . " | mariadb $auth $dbNameArg");
                 }

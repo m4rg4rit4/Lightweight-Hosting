@@ -67,7 +67,7 @@ ask_input() {
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION="1.4.15"
+    VERSION="1.4.19"
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
