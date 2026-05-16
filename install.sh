@@ -67,7 +67,7 @@ ask_input() {
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION="1.4.10"
+    VERSION="1.4.15"
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
@@ -562,6 +562,14 @@ define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
 define('SYSTEM_VERSION', '$VERSION');
 define('HOSTING_INSTALLED', 'true');
 EOF
+
+# Conservar DISABLE_LOGIN si existe
+if grep -q "DISABLE_LOGIN" "$EXISTING_CONFIG" 2>/dev/null; then
+    CUR_DL=$(grep "DISABLE_LOGIN" "$EXISTING_CONFIG" | cut -d"," -f2 | cut -d")" -f1 | tr -d "[:space:]'")
+    echo "define('DISABLE_LOGIN', $CUR_DL);" >> $ADMIN_PATH/config.php
+else
+    echo "define('DISABLE_LOGIN', false);" >> $ADMIN_PATH/config.php
+fi
 
 # DNS Alternativo (Si están definidos)
 if [ ! -z "$EXISTING_DNS_TOKEN" ]; then
