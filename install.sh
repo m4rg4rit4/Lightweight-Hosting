@@ -67,7 +67,8 @@ ask_input() {
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION="1.4.19"
+    VERSION=$(curl -sSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/VERSION 2>/dev/null | tr -d '[:space:]')
+    VERSION=${VERSION:-"1.4.20"}
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
