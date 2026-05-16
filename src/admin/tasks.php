@@ -16,6 +16,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->execute([$taskId]);
         header("Location: tasks.php?msg=Task+Deleted");
         exit;
+    } elseif ($action === 'delete_completed') {
+        $stmt = $pdo->prepare("DELETE FROM sys_tasks WHERE status IN ('success', 'error')");
+        $stmt->execute();
+        header("Location: tasks.php?msg=History+Cleared");
+        exit;
     }
 }
 
@@ -158,7 +163,15 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50"
 
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
             <h1>Cola de Procesamiento</h1>
-            <div style="font-size: 0.85rem; color: var(--text-dim);">Últimas 50 tareas</div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <form method="POST" onsubmit="return confirm('¿Seguro que deseas eliminar permanentemente todas las tareas que ya han finalizado?');">
+                    <input type="hidden" name="action" value="delete_completed">
+                    <button type="submit" class="btn-action btn-danger" style="padding: 8px 16px; font-size: 0.8rem;">
+                        Limpiar Historial
+                    </button>
+                </form>
+                <div style="font-size: 0.85rem; color: var(--text-dim);">Últimas 50 tareas</div>
+            </div>
         </div>
 
         <table>
