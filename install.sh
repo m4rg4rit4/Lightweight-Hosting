@@ -545,6 +545,12 @@ else
     [ "$CURRENT_MANAGER" = "dbadmin" ] && rm -rf "$ADMIN_PATH/dbadmin"
 fi
 
+# Conservar DISABLE_LOGIN si existe (guardar antes de sobreescribir config.php)
+PREVIOUS_DL="false"
+if [ -f "$EXISTING_CONFIG" ] && grep -q "DISABLE_LOGIN" "$EXISTING_CONFIG"; then
+    PREVIOUS_DL=$(grep "DISABLE_LOGIN" "$EXISTING_CONFIG" | cut -d"," -f2 | cut -d")" -f1 | tr -d "[:space:]'")
+fi
+
 cat <<EOF > $ADMIN_PATH/config.php
 <?php
 define('DB_HOST', '127.0.0.1');
@@ -561,15 +567,8 @@ define('LETSENCRYPT_EMAIL', '$ADMIN_EMAIL');
 define('DB_MANAGER_DIR', '$DB_MANAGER_DIR');
 define('SYSTEM_VERSION', '$VERSION');
 define('HOSTING_INSTALLED', 'true');
+define('DISABLE_LOGIN', $PREVIOUS_DL);
 EOF
-
-# Conservar DISABLE_LOGIN si existe
-if grep -q "DISABLE_LOGIN" "$EXISTING_CONFIG" 2>/dev/null; then
-    CUR_DL=$(grep "DISABLE_LOGIN" "$EXISTING_CONFIG" | cut -d"," -f2 | cut -d")" -f1 | tr -d "[:space:]'")
-    echo "define('DISABLE_LOGIN', $CUR_DL);" >> $ADMIN_PATH/config.php
-else
-    echo "define('DISABLE_LOGIN', false);" >> $ADMIN_PATH/config.php
-fi
 
 # DNS Alternativo (Si están definidos)
 if [ ! -z "$EXISTING_DNS_TOKEN" ]; then
