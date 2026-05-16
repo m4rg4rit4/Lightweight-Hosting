@@ -29,6 +29,10 @@ if (!$configLoaded) {
 
 // Función para verificar si el usuario está logueado
 function checkAuth() {
+    if (defined('DISABLE_LOGIN') && DISABLE_LOGIN === true) {
+        $_SESSION['lwh_logged_in'] = true;
+        return;
+    }
     if (!isset($_SESSION['lwh_logged_in']) || $_SESSION['lwh_logged_in'] !== true) {
         // Redirigir al login.php en el mismo directorio con parámetro de retorno
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';

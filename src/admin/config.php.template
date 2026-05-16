@@ -10,6 +10,7 @@ define('LETSENCRYPT_EMAIL', '{{LETSENCRYPT_EMAIL}}');
 define('DB_MANAGER_DIR', '{{DB_MANAGER_DIR}}');
 define('SYSTEM_VERSION', '{{VERSION}}');
 define('HOSTING_INSTALLED', 'true');
+define('DISABLE_LOGIN', false); // Set to true for testing purposes to bypass login
 
 // Los servidores DNS se configuran desde el dashboard (dns_servers.php)
 // Ya no es necesario definir DNS_TOKEN ni DNS_SERVER aquí.
