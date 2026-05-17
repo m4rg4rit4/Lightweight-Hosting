@@ -227,6 +227,7 @@ try {
         setting_value TEXT NOT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )");
+    $pdo->exec("INSERT IGNORE INTO sys_settings (setting_key, setting_value) VALUES ('backup_retention_days', '7')");
     $pdo->exec("CREATE TABLE IF NOT EXISTS sys_backups (
         id INT AUTO_INCREMENT PRIMARY KEY,
         site_id INT NOT NULL,
@@ -852,15 +853,15 @@ foreach ($tasks as $task) {
             @unlink($tmpTar);
             
             // Retención
-            $retention = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'backup_retention_days'")->fetchColumn();
-            if ($retention && is_numeric($retention)) {
-                $oldBackups = $pdo->prepare("SELECT id, filename, mega_path FROM sys_backups WHERE site_id = ? AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
-                $oldBackups->execute([$siteId, $retention]);
-                foreach($oldBackups->fetchAll() as $old) {
-                    $rmPath = escapeshellarg($old['mega_path'] . '/' . $old['filename']);
-                    exec("/usr/bin/mega-rm $rmPath 2>&1");
-                    $pdo->prepare("DELETE FROM sys_backups WHERE id = ?")->execute([$old['id']]);
-                }
+            $retentionVal = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'backup_retention_days'")->fetchColumn();
+            $retention = ($retentionVal !== false && $retentionVal !== null && is_numeric($retentionVal)) ? (int)$retentionVal : 7;
+
+            $oldBackups = $pdo->prepare("SELECT id, filename, mega_path FROM sys_backups WHERE site_id = ? AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
+            $oldBackups->execute([$siteId, $retention]);
+            foreach($oldBackups->fetchAll() as $old) {
+                $rmPath = escapeshellarg($old['mega_path'] . '/' . $old['filename']);
+                exec("/usr/bin/mega-rm $rmPath 2>&1");
+                $pdo->prepare("DELETE FROM sys_backups WHERE id = ?")->execute([$old['id']]);
             }
             break;
 

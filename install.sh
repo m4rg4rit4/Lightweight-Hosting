@@ -381,6 +381,7 @@ mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_settings (
     setting_value TEXT NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );"
+mariadb -D dbadmin -e "INSERT IGNORE INTO sys_settings (setting_key, setting_value) VALUES ('backup_retention_days', '7');"
 
 # Crear tabla de copias de seguridad
 mariadb -D dbadmin -e "CREATE TABLE IF NOT EXISTS sys_backups (
