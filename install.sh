@@ -646,6 +646,14 @@ if [ -z "$REAL_PHP_SOCKET" ]; then
     fi
 fi
 
+# Determinar si existen certificados SSL para habilitarlos en el puerto 8090
+SSL_CONFIG_8090=""
+if [ -f "/etc/letsencrypt/live/$FULL_FQDN/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/$FULL_FQDN/privkey.pem" ]; then
+    SSL_CONFIG_8090="SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/$FULL_FQDN/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/$FULL_FQDN/privkey.pem"
+fi
+
 cat <<EOF > /etc/apache2/sites-available/000-admin.conf
 <VirtualHost *:8080>
     DocumentRoot $ADMIN_PATH
@@ -685,6 +693,8 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
     DirectoryIndex index.php
     ErrorLog \${APACHE_LOG_DIR}/admin_ssl_error.log
     CustomLog \${APACHE_LOG_DIR}/admin_ssl_access.log combined
+
+    $SSL_CONFIG_8090
 
     Alias /phpmyadmin $ADMIN_PATH/phpmyadmin
     Alias /dbadmin $ADMIN_PATH/dbadmin
