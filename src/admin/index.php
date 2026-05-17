@@ -80,6 +80,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 case 'toggle_ssl_wildcard':
                     $taskType = 'SSL_ISSUE_WILDCARD';
                     break;
+                case 'export':
+                    $taskType = 'SITE_EXPORT';
+                    $payload['site_id'] = $siteId;
+                    $payload['token'] = bin2hex(random_bytes(16));
+                    break;
                 case 'delete':
                     if ($siteId == 1) {
                         $msg = "El sitio principal no puede ser eliminado.";
@@ -320,6 +325,22 @@ if (hasDnsServers()) {
                             <?php endif; ?>
                             <a href="databases.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--info);">BBDD</a>
                             <a href="filemanager.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--warning);">Archivos</a>
+                            <?php
+                            $exportFiles = glob(__DIR__ . '/downloads/export_' . $s['domain'] . '_*.tar.gz');
+                            $exportReady = !empty($exportFiles);
+                            if ($exportReady):
+                                $exportFileName = basename($exportFiles[0]);
+                            ?>
+                                <a href="download.php?file=<?php echo urlencode($exportFileName); ?>" class="btn btn-outline btn-sm" style="color: var(--success); border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.05);" title="Descargar exportación completa y eliminar del servidor">⬇️ Descargar</a>
+                            <?php else: ?>
+                                <form method="POST" style="display:inline;">
+                                    <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
+                                    <input type="hidden" name="action" value="export">
+                                    <button type="submit" class="btn btn-outline btn-sm" style="color: #c084fc; border-color: rgba(192, 132, 252, 0.3);" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?> title="Comprimir sitio y bases de datos">
+                                        📦 Exportar
+                                    </button>
+                                </form>
+                            <?php endif; ?>
                         </div>
                     </td>
                 </tr>

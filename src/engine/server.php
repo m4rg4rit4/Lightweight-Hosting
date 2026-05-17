@@ -975,6 +975,90 @@ foreach ($tasks as $task) {
             $success = true;
             break;
 
+        case 'SITE_EXPORT':
+            $siteId = $payload['site_id'];
+            $token = $payload['token'];
+            
+            $site = $pdo->prepare("SELECT domain, document_root FROM sys_sites WHERE id = ?");
+            $site->execute([$siteId]);
+            $siteData = $site->fetch();
+            
+            if (!$siteData) {
+                $msg = "Site not found for export.";
+                $success = false;
+                break;
+            }
+            
+            $domain = $siteData['domain'];
+            $docRoot = $siteData['document_root'];
+            
+            // 1. Crear directorio de descargas de forma segura si no existe
+            $downloadsDir = "/var/www/admin_panel/downloads";
+            if (!is_dir($downloadsDir)) {
+                mkdir($downloadsDir, 0755, true);
+                shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($downloadsDir));
+            }
+            
+            // Limpiar exportaciones huérfanas de más de 1 hora
+            $now = time();
+            foreach (glob("$downloadsDir/export_*_*.tar.gz") as $oldFile) {
+                if (($now - filemtime($oldFile)) > 3600) {
+                    @unlink($oldFile);
+                }
+            }
+            
+            // 2. Obtener TODAS las bases de datos asociadas al sitio
+            $stmtDbs = $pdo->prepare("SELECT db_name, db_user, db_pass FROM sys_databases WHERE site_id = ?");
+            $stmtDbs->execute([$siteId]);
+            $associatedDbs = $stmtDbs->fetchAll();
+            
+            $timestamp = date('Ymd_His');
+            $exportFile = "export_{$domain}_{$token}.tar.gz";
+            $tmpDir = "/tmp/export_{$domain}_{$token}";
+            $tmpTar = "$downloadsDir/$exportFile";
+            
+            mkdir($tmpDir, 0755, true);
+            
+            $dbFiles = [];
+            if (!empty($associatedDbs)) {
+                $dbDir = "$tmpDir/databases";
+                mkdir($dbDir, 0755, true);
+                
+                $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
+                $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
+                $dumpBin = file_exists('/usr/bin/mariadb-dump') ? '/usr/bin/mariadb-dump' : '/usr/bin/mysqldump';
+                
+                foreach ($associatedDbs as $db) {
+                    $dbNameArg = escapeshellarg($db['db_name']);
+                    $safeFile = "{$db['db_name']}.sql.gz";
+                    shell_exec("$dumpBin $auth {$dbNameArg} | gzip > {$dbDir}/{$safeFile}");
+                    $dbFiles[] = "databases/{$safeFile}";
+                }
+            }
+            
+            // Simlink para ahorrar espacio durante el tar (dereference con -h)
+            symlink($docRoot, "$tmpDir/webroot");
+            
+            $itemsToTar = "webroot";
+            if (!empty($dbFiles)) {
+                $itemsToTar .= " databases/";
+            }
+            
+            $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " $itemsToTar";
+            shell_exec($tarCmd);
+            shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($tmpTar));
+            
+            shell_exec("rm -rf " . escapeshellarg($tmpDir));
+            
+            if (file_exists($tmpTar) && filesize($tmpTar) > 0) {
+                $msg = "Site and databases exported successfully to $exportFile.";
+                $success = true;
+            } else {
+                $msg = "Failed to create compressed export archive.";
+                $success = false;
+            }
+            break;
+
         case 'SYSTEM_UPDATE':
             $msg = 'Iniciando actualización del sistema desde GitHub...';
             $tempInstall = "/tmp/install_hosting_update.sh";
