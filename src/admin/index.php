@@ -225,7 +225,9 @@ if (hasDnsServers()) {
                 <tr>
                     <td style="color: var(--text-dim); font-weight: 600; font-family: monospace;">#<?php echo $s['id']; ?></td>
                     <td style="font-weight: 500;">
-                        <?php echo htmlspecialchars($s['domain']); ?>
+                        <a href="<?php echo ($s['ssl_enabled'] == 1 ? 'https://' : 'http://') . htmlspecialchars($s['domain']); ?>" target="_blank" class="site-link">
+                            <?php echo htmlspecialchars($s['domain']); ?>
+                        </a>
                         <div style="font-size: 0.75rem; color: var(--text-dim); font-weight: 300;"><?php echo $s['created_at']; ?></div>
                     </td>
                     <td>

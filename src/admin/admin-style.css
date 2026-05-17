@@ -241,3 +241,18 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .info-card { background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
 .info-card .label { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px; }
 .info-card .value { font-size: 0.9rem; font-weight: 600; color: var(--text); overflow-wrap: break-word; }
+
+/* Site list custom clickable links */
+.site-link {
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s, border-bottom-color 0.2s;
+    border-bottom: 1px dashed transparent;
+    display: inline-block;
+}
+.site-link:hover {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
