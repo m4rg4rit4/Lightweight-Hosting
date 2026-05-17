@@ -370,7 +370,7 @@ foreach ($tasks as $task) {
             if ($dnsPmaFullOk) $domainsArg .= " -d " . escapeshellarg("phpmyadmin.$domain");
             
             // Usamos --keep-until-expiring para evitar que certbot falle si el cert ya es reciente
-            $cmd = "$cmd_certbot --apache $domainsArg --non-interactive --agree-tos --email " . escapeshellarg($email) . " --redirect --keep-until-expiring 2>&1";
+            $cmd = "$cmd_certbot --apache $domainsArg --non-interactive --agree-tos --email " . escapeshellarg($email) . " --keep-until-expiring 2>&1";
             exec($cmd, $output, $resultCode);
 
             // Verificación robusta: aunque certbot de un código de salida extraño, 
