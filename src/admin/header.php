@@ -4,11 +4,19 @@ checkAuth();
 ?>
 <link rel="stylesheet" href="admin-style.css">
 <nav>
-    <div style="display: flex; flex-direction: column;">
-        <strong>Lightweight Hosting</strong>
-        <?php if (defined('SYSTEM_VERSION')): ?>
-            <span style="font-size: 0.7rem; color: var(--text-dim); margin-top: -4px;">v<?php echo SYSTEM_VERSION; ?></span>
-        <?php endif; ?>
+    <div style="display: flex; flex-direction: column; gap: 2px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <strong>Lightweight Hosting</strong>
+            <?php if (defined('SYSTEM_VERSION')): ?>
+                <span style="font-size: 0.65rem; color: var(--text-dim); background: var(--border); padding: 1px 4px; border-radius: 3px; font-weight: 600; font-family: monospace;">v<?php echo SYSTEM_VERSION; ?></span>
+            <?php endif; ?>
+        </div>
+        <form method="POST" action="index.php" style="margin: 0;" onsubmit="return confirm('¿Seguro que deseas actualizar el sistema desde GitHub? Se ejecutarán los comandos apt-get update y upgrade de forma automática.');">
+            <input type="hidden" name="action" value="system_update">
+            <button type="submit" class="btn-update-system">
+                🔄 Actualizar
+            </button>
+        </form>
     </div>
     <?php
     $current_page = basename($_SERVER['PHP_SELF']);

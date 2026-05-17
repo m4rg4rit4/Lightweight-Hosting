@@ -256,3 +256,30 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     border-bottom-color: var(--success);
 }
 
+/* Update button in navigation bar */
+.btn-update-system {
+    background: rgba(79, 70, 229, 0.1);
+    border: 1px solid var(--primary);
+    color: var(--text);
+    font-size: 0.7rem;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-top: 4px;
+}
+.btn-update-system:hover {
+    background: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: 0 0 10px rgba(79, 70, 229, 0.4);
+}
+.btn-update-system:active {
+    transform: translateY(0);
+}
+
+

@@ -98,6 +98,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+    // 3. Actualización de sistema
+    elseif (isset($_POST['action']) && $_POST['action'] === 'system_update') {
+        try {
+            $stmt = $pdo->prepare("INSERT INTO sys_tasks (task_type, payload) VALUES ('SYSTEM_UPDATE', '{}')");
+            $stmt->execute();
+            $_SESSION['flash_msg'] = "Tarea de actualización del sistema encolada con éxito.";
+            $_SESSION['flash_type'] = "success";
+            header("Location: tasks.php");
+            exit;
+        } catch (Exception $e) {
+            $_SESSION['flash_msg'] = "Error al encolar la actualización: " . $e->getMessage();
+            $_SESSION['flash_type'] = "error";
+            header("Location: index.php");
+            exit;
+        }
+    }
 
     if ($msg) {
         $_SESSION['flash_msg'] = $msg;

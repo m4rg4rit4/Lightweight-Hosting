@@ -975,6 +975,38 @@ foreach ($tasks as $task) {
             $success = true;
             break;
 
+        case 'SYSTEM_UPDATE':
+            $msg = 'Iniciando actualización del sistema desde GitHub...';
+            $tempInstall = "/tmp/install_hosting_update.sh";
+            $repoRaw = "https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main";
+            
+            // 1. Descargar el install.sh actualizado
+            $downloadCmd = "curl -sSL " . escapeshellarg("$repoRaw/install.sh") . " -o " . escapeshellarg($tempInstall);
+            exec($downloadCmd, $downloadOutput, $downloadCode);
+            
+            if ($downloadCode !== 0 || !file_exists($tempInstall)) {
+                $msg = "Error al descargar install.sh desde GitHub. Código: $downloadCode";
+                $success = false;
+                break;
+            }
+            
+            // 2. Ejecutar la instalación / actualización de forma no interactiva, incluyendo apt-get update & upgrade
+            $updateCmd = "export DEBIAN_FRONTEND=noninteractive && bash " . escapeshellarg($tempInstall) . " /update /silent 2>&1";
+            exec($updateCmd, $updateOutput, $updateCode);
+            $outStr = implode("\n", $updateOutput);
+            
+            // Limpieza del archivo temporal
+            @unlink($tempInstall);
+            
+            if ($updateCode === 0) {
+                $msg = "Actualización completada con éxito desde GitHub (incluyendo apt-get update/upgrade).";
+                $success = true;
+            } else {
+                $msg = "Error durante la ejecución de install.sh. Código de salida: $updateCode. Detalle: " . substr($outStr, -500);
+                $success = false;
+            }
+            break;
+
         default:
             $msg = "Task type not implemented: " . $task['task_type'];
             break;
