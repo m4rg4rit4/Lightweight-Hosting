@@ -243,7 +243,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .info-card .value { font-size: 0.9rem; font-weight: 600; color: var(--text); overflow-wrap: break-word; }
 
 /* Site list custom clickable links */
-.site-link {
+.site-link, .site-link:visited {
     color: var(--text);
     text-decoration: none;
     font-weight: 500;
@@ -252,7 +252,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     display: inline-block;
 }
 .site-link:hover {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
+    color: var(--success);
+    border-bottom-color: var(--success);
 }
 
