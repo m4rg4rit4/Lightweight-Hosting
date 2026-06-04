@@ -104,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $domain = trim($_POST['domain']);
 
         // Validación básica
-        if (!preg_match('/^[a-z0-9.*@-]*$/i', $name)) {
+        if (!preg_match('/^[a-z0-9.*@_-]*$/i', $name)) {
             $msg = "Error: El nombre del host contiene caracteres no válidos.";
         } elseif (($type === 'A' || $type === 'AAAA') && !filter_var($content, FILTER_VALIDATE_IP, $type === 'A' ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6)) {
              $msg = "Error: La dirección IP no es válida.";
@@ -166,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ttl = (int)trim($_POST['ttl']);
         $priority = !empty($_POST['priority']) ? (int)trim($_POST['priority']) : null;
 
-        if (!preg_match('/^[a-z0-9.*@-]*$/i', $name)) {
+        if (!preg_match('/^[a-z0-9.*@_-]*$/i', $name)) {
             $msg = "Error: El nombre del host contiene caracteres no válidos.";
         } elseif (($type === 'A' || $type === 'AAAA') && !filter_var($content, FILTER_VALIDATE_IP, $type === 'A' ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6)) {
             $msg = "Error: La dirección IP no es válida.";
