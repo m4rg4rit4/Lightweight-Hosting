@@ -150,7 +150,7 @@ function checkExternalDNS($domain, $expectedIP) {
 }
 
 function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = false) {
-    global $php_socket;
+    global $php_socket, $pdo;
     $port = $is_ssl ? 443 : 80;
     $vhost = "<VirtualHost *:$port>\n";
     $vhost .= "    ServerName $domain\n";
@@ -192,6 +192,35 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
         $vhost .= "    <FilesMatch \.php$>\n";
         $vhost .= "        SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
         $vhost .= "    </FilesMatch>\n";
+        
+        try {
+            $stmt = $pdo->prepare("SELECT php_upload_max_filesize, php_post_max_size, php_max_file_uploads, php_memory_limit FROM sys_sites WHERE domain = ?");
+            $stmt->execute([$domain]);
+            $php_settings = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($php_settings) {
+                $admin_value = "";
+                if (!empty($php_settings['php_upload_max_filesize'])) {
+                    $admin_value .= "upload_max_filesize=" . $php_settings['php_upload_max_filesize'] . " \\n ";
+                }
+                if (!empty($php_settings['php_post_max_size'])) {
+                    $admin_value .= "post_max_size=" . $php_settings['php_post_max_size'] . " \\n ";
+                }
+                if (!empty($php_settings['php_max_file_uploads'])) {
+                    $admin_value .= "max_file_uploads=" . $php_settings['php_max_file_uploads'] . " \\n ";
+                }
+                if (!empty($php_settings['php_memory_limit'])) {
+                    $admin_value .= "memory_limit=" . $php_settings['php_memory_limit'] . " \\n ";
+                }
+                
+                $admin_value = trim($admin_value, " \\n");
+                if ($admin_value) {
+                    $vhost .= "    SetEnv PHP_ADMIN_VALUE \"$admin_value\"\n";
+                }
+            }
+        } catch (Exception $e) {
+            // Silencioso
+        }
     }
 
     if ($is_ssl) {
@@ -244,6 +273,12 @@ try {
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS dns_sync_status VARCHAR(100) DEFAULT 'ok'");
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS dns_last_sync DATETIME");
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS backup_frequency ENUM('none', 'daily', 'weekly') DEFAULT 'none'");
+
+    // Nuevas columnas para configuración PHP
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_upload_max_filesize VARCHAR(16) DEFAULT '8M'");
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_post_max_size VARCHAR(16) DEFAULT '25M'");
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_max_file_uploads INT DEFAULT 20");
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_memory_limit VARCHAR(16) DEFAULT '128M'");
 
 } catch (Exception $e) {
     // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root
@@ -483,6 +518,27 @@ foreach ($tasks as $task) {
                 shell_exec($cmd_apache_reload);
                 $pdo->prepare("UPDATE sys_sites SET php_enabled = ? WHERE domain = ?")->execute([$newValue, $domain]);
                 $msg = "PHP set to " . ($newValue ? 'ON' : 'OFF');
+                $success = true;
+            }
+            break;
+
+        case 'SITE_UPDATE_PHP_SETTINGS':
+            $site = $pdo->prepare("SELECT * FROM sys_sites WHERE domain = ?");
+            $site->execute([$domain]);
+            $site = $site->fetch();
+            
+            if ($site) {
+                // Actualizar vhost HTTP
+                file_put_contents("/etc/apache2/sites-available/$domain.conf", generateVhost($domain, $site['document_root'], $site['php_enabled'], $php_v));
+                
+                // Actualizar vhost SSL si existe
+                $sslConf = "/etc/apache2/sites-available/$domain-le-ssl.conf";
+                if (file_exists($sslConf)) {
+                    file_put_contents($sslConf, generateVhost($domain, $site['document_root'], $site['php_enabled'], $php_v, true));
+                }
+                
+                shell_exec($cmd_apache_reload);
+                $msg = "PHP settings updated for $domain.";
                 $success = true;
             }
             break;

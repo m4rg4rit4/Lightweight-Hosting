@@ -93,6 +93,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $taskType = 'SITE_DELETE';
                     }
                     break;
+                case 'update_php_config':
+                    $upload_max = trim($_POST['php_upload_max_filesize'] ?? '8M');
+                    $post_max = trim($_POST['php_post_max_size'] ?? '25M');
+                    $max_file_uploads = (int)($_POST['php_max_file_uploads'] ?? 20);
+                    $memory_limit = trim($_POST['php_memory_limit'] ?? '128M');
+                    
+                    $pdo->prepare("UPDATE sys_sites SET php_upload_max_filesize = ?, php_post_max_size = ?, php_max_file_uploads = ?, php_memory_limit = ? WHERE id = ?")
+                        ->execute([$upload_max, $post_max, $max_file_uploads, $memory_limit, $siteId]);
+                        
+                    $taskType = 'SITE_UPDATE_PHP_SETTINGS';
+                    break;
             }
 
             if ($taskType) {
@@ -263,6 +274,13 @@ if (hasDnsServers()) {
                                 <?php endif; ?>
                             </button>
                         </form>
+                        <?php if ($s['php_enabled'] == 1): ?>
+                        <div style="margin-top: 4px;">
+                            <button type="button" class="btn btn-outline btn-sm" style="font-size: 0.8rem; padding: 2px 8px; color: var(--text-dim);" onclick="openPhpConfigModal(<?php echo $s['id']; ?>, '<?php echo htmlspecialchars($s['domain']); ?>', '<?php echo htmlspecialchars($s['php_upload_max_filesize'] ?? '8M'); ?>', '<?php echo htmlspecialchars($s['php_post_max_size'] ?? '25M'); ?>', <?php echo htmlspecialchars($s['php_max_file_uploads'] ?? 20); ?>, '<?php echo htmlspecialchars($s['php_memory_limit'] ?? '128M'); ?>')" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>
+                                ⚙️ Config PHP
+                            </button>
+                        </div>
+                        <?php endif; ?>
                     </td>
                     <td>
                         <?php 
@@ -353,7 +371,86 @@ if (hasDnsServers()) {
             </tbody>
         </table>
 
+        <!-- PHP Config Modal -->
+        <div id="phpConfigModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+            <div style="background:var(--bg-card); padding:20px; border-radius:12px; width:400px; max-width:90%; border:1px solid var(--border);">
+                <h3 style="margin-top:0;">Configuración PHP: <span id="phpConfigDomain"></span></h3>
+                <form method="POST" id="phpConfigForm" onsubmit="return validatePhpConfig();">
+                    <input type="hidden" name="action" value="update_php_config">
+                    <input type="hidden" name="site_id" id="phpConfigSiteId">
+                    
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label>upload_max_filesize (ej: 8M, 2G)</label>
+                        <input type="text" name="php_upload_max_filesize" id="php_upload_max_filesize" required style="width:100%;">
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label>post_max_size (ej: 25M) - debe ser mayor o igual que upload</label>
+                        <input type="text" name="php_post_max_size" id="php_post_max_size" required style="width:100%;">
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label>max_file_uploads (ej: 20)</label>
+                        <input type="number" name="php_max_file_uploads" id="php_max_file_uploads" required style="width:100%;">
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label>memory_limit (ej: 128M, 512M)</label>
+                        <input type="text" name="php_memory_limit" id="php_memory_limit" required style="width:100%;">
+                    </div>
+                    
+                    <div style="display:flex; gap:10px; justify-content:flex-end;">
+                        <button type="button" class="btn btn-outline" onclick="closePhpConfigModal()">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Guardar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
     <script>
+        function openPhpConfigModal(siteId, domain, upload, post, maxFiles, memory) {
+            document.getElementById('phpConfigSiteId').value = siteId;
+            document.getElementById('phpConfigDomain').innerText = domain;
+            document.getElementById('php_upload_max_filesize').value = upload;
+            document.getElementById('php_post_max_size').value = post;
+            document.getElementById('php_max_file_uploads').value = maxFiles;
+            document.getElementById('php_memory_limit').value = memory;
+            document.getElementById('phpConfigModal').style.display = 'flex';
+        }
+
+        function closePhpConfigModal() {
+            document.getElementById('phpConfigModal').style.display = 'none';
+        }
+
+        function parseSize(sizeStr) {
+            sizeStr = sizeStr.trim().toUpperCase();
+            let num = parseFloat(sizeStr);
+            if (sizeStr.endsWith('G')) return num * 1024;
+            if (sizeStr.endsWith('M')) return num;
+            if (sizeStr.endsWith('K')) return num / 1024;
+            return num / (1024 * 1024); // Assume bytes if no letter
+        }
+
+        function validatePhpConfig() {
+            const uploadStr = document.getElementById('php_upload_max_filesize').value;
+            const postStr = document.getElementById('php_post_max_size').value;
+            const memoryStr = document.getElementById('php_memory_limit').value;
+            
+            const regex = /^\d+[KMG]$/i;
+            if (!regex.test(uploadStr) || !regex.test(postStr) || (!regex.test(memoryStr) && memoryStr !== '-1')) {
+                alert("Por favor usa el formato correcto (ej: 8M, 1G, 512K).");
+                return false;
+            }
+            
+            const uploadSize = parseSize(uploadStr);
+            const postSize = parseSize(postStr);
+            
+            if (postSize < uploadSize) {
+                alert("post_max_size debe ser mayor o igual que upload_max_filesize.");
+                return false;
+            }
+            return true;
+        }
         let lastPendingCount = -1;
 
         function toggleNewSiteForm() {
