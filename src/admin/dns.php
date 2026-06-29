@@ -147,7 +147,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'content' => $content,
             'ttl' => 3600
         ];
-        if ($action === 'edit_record') $payload['id'] = $record_id;
+        if ($action === 'edit_record') {
+            $payload['id'] = 0;
+            $payload['old_name'] = '@';
+            $payload['old_type'] = 'SOA';
+            $payload['old_content'] = '';
+        }
 
         $res = dnsApiRequest($action === 'edit_record' ? '/api-dns/record/edit' : '/api-dns/record/add', 'POST', $payload);
         if ($res['code'] === 200) {
@@ -165,6 +170,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $content = trim($_POST['content']);
         $ttl = (int)trim($_POST['ttl']);
         $priority = !empty($_POST['priority']) ? (int)trim($_POST['priority']) : null;
+        $domain = trim($_POST['domain'] ?? '');
+        $old_name = trim($_POST['old_name'] ?? '');
+        $old_type = trim($_POST['old_type'] ?? '');
+        $old_content = trim($_POST['old_content'] ?? '');
 
         if (!preg_match('/^[a-z0-9.*@_-]*$/i', $name)) {
             $msg = "Error: El nombre del host contiene caracteres no válidos.";
@@ -172,12 +181,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = "Error: La dirección IP no es válida.";
         } else {
             $res = dnsApiRequest('/api-dns/record/edit', 'POST', [
-                'id' => $record_id,
+                'id' => 0,
+                'domain' => $domain,
                 'name' => $name,
                 'type' => $type,
                 'content' => $content,
                 'ttl' => $ttl,
-                'priority' => $priority
+                'priority' => $priority,
+                'old_name' => $old_name,
+                'old_type' => $old_type,
+                'old_content' => $old_content
             ]);
             
             if ($res['code'] === 200) {
@@ -191,7 +204,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     elseif ($action === 'delete_record') {
         $res = dnsApiRequest('/api-dns/record/del', 'POST', [
-            'id' => (int)$_POST['record_id']
+            'id' => 0,
+            'domain' => trim($_POST['domain'] ?? ''),
+            'name' => trim($_POST['name'] ?? ''),
+            'type' => trim($_POST['type'] ?? ''),
+            'content' => trim($_POST['content'] ?? '')
         ]);
         
             if ($res['code'] === 200) {
@@ -826,6 +843,10 @@ if ($activeDomain && isset($_GET['export'])) {
                                                         <form method="POST" onsubmit="return confirm('¿Eliminar de forma permanente este registro DNS?');">
                                                             <input type="hidden" name="action" value="delete_record">
                                                             <input type="hidden" name="record_id" value="<?php echo $r['id']; ?>">
+                                                            <input type="hidden" name="domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
+                                                            <input type="hidden" name="name" value="<?php echo htmlspecialchars($r['name']); ?>">
+                                                            <input type="hidden" name="type" value="<?php echo htmlspecialchars($r['type']); ?>">
+                                                            <input type="hidden" name="content" value="<?php echo htmlspecialchars($r['content']); ?>">
                                                             <button type="submit" class="btn btn-danger" style="padding: 6px; border-radius: 6px;" title="Eliminar Registro">
                                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                                             </button>
@@ -910,6 +931,19 @@ if ($activeDomain && isset($_GET['export'])) {
                 rowAdd.querySelector('form').appendChild(hiddenId);
             }
             rowAdd.querySelector('input[name="record_id"]').value = record.id;
+            
+            // Añadir campos old_ para claves naturales
+            ['old_name', 'old_type', 'old_content'].forEach(fieldName => {
+                if (!rowAdd.querySelector('input[name="' + fieldName + '"]')) {
+                    const hiddenField = document.createElement('input');
+                    hiddenField.type = 'hidden';
+                    hiddenField.name = fieldName;
+                    rowAdd.querySelector('form').appendChild(hiddenField);
+                }
+            });
+            rowAdd.querySelector('input[name="old_name"]').value = record.name;
+            rowAdd.querySelector('input[name="old_type"]').value = record.type;
+            rowAdd.querySelector('input[name="old_content"]').value = record.content;
             
             // Cargar valores
             rowAdd.querySelector('select[name="type"]').value = record.type;
