@@ -201,19 +201,19 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
             if ($php_settings) {
                 $admin_value = "";
                 if (!empty($php_settings['php_upload_max_filesize'])) {
-                    $admin_value .= "upload_max_filesize=" . $php_settings['php_upload_max_filesize'] . " \\n ";
+                    $admin_value .= "upload_max_filesize=" . $php_settings['php_upload_max_filesize'] . "\\n";
                 }
                 if (!empty($php_settings['php_post_max_size'])) {
-                    $admin_value .= "post_max_size=" . $php_settings['php_post_max_size'] . " \\n ";
+                    $admin_value .= "post_max_size=" . $php_settings['php_post_max_size'] . "\\n";
                 }
                 if (!empty($php_settings['php_max_file_uploads'])) {
-                    $admin_value .= "max_file_uploads=" . $php_settings['php_max_file_uploads'] . " \\n ";
+                    $admin_value .= "max_file_uploads=" . $php_settings['php_max_file_uploads'] . "\\n";
                 }
                 if (!empty($php_settings['php_memory_limit'])) {
-                    $admin_value .= "memory_limit=" . $php_settings['php_memory_limit'] . " \\n ";
+                    $admin_value .= "memory_limit=" . $php_settings['php_memory_limit'] . "\\n";
                 }
                 
-                $admin_value = trim($admin_value, " \\n");
+                $admin_value = rtrim($admin_value, "\\n");
                 if ($admin_value) {
                     $vhost .= "    SetEnv PHP_ADMIN_VALUE \"$admin_value\"\n";
                 }
