@@ -284,6 +284,125 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
     </div>
 
     <script>
+        function editServer(server) {
+            document.getElementById('edit_id').value = server.id;
+            document.getElementById('edit_name').value = server.name;
+            document.getElementById('edit_url').value = server.url;
+            document.getElementById('edit_token').value = server.token;
+            document.getElementById('modal-edit').style.display = 'flex';
+        }
+
+        function generateToken(inputId) {
+            const chars = 'abcdef0123456789';
+            let result = '';
+            for (let i = 0; i < 32; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            document.getElementById(inputId).value = result;
+        }
+
+        async function testConnection(urlInputId, tokenInputId) {
+            const urlInput = document.getElementById(urlInputId);
+            const tokenInput = document.getElementById(tokenInputId);
+            const url = urlInput.value.replace(/\/+$/, '');
+            const token = tokenInput.value;
+            const resultDiv = document.getElementById('test-result-add');
+
+            if (!url || !token) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = 'rgba(239, 68, 68, 0.1)';
+                resultDiv.style.color = 'var(--error)';
+                resultDiv.textContent = 'Introduce la URL y el token primero.';
+                return;
+            }
+
+            resultDiv.style.display = 'block';
+            resultDiv.style.background = 'rgba(14, 165, 233, 0.1)';
+            resultDiv.style.color = 'var(--info)';
+            resultDiv.textContent = '⏳ Probando conexión...';
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'test');
+                formData.append('test_url', url);
+                formData.append('test_token', token);
+                formData.append('ajax', '1');
+
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+
+                const data = await response.json();
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = data.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+                resultDiv.style.color = data.type === 'success' ? 'var(--success)' : 'var(--error)';
+                resultDiv.textContent = data.message;
+            } catch (error) {
+                resultDiv.style.background = 'rgba(239, 68, 68, 0.1)';
+                resultDiv.style.color = 'var(--error)';
+                resultDiv.textContent = '❌ Error de red o del servidor.';
+            }
+        }
+
+        async function testConnectionInline(btn, url, token) {
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '⏳...';
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'test');
+                formData.append('test_url', url);
+                formData.append('test_token', token);
+                formData.append('ajax', '1');
+
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+
+                const data = await response.json();
+                alert(data.message);
+            } catch (error) {
+                alert('❌ Error al probar conexión.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        // Close modal on click outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('modal-edit');
+            if (event.target === modal) modal.style.display = 'none';
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.getElementById('modal-edit').style.display = 'none';
+                document.getElementById('form-add-server').style.display = 'none';
+            }
+        });
+
+        // Task notification check
+        async function checkTasks() {
+            try {
+                const response = await fetch('tasks_status.php?t=' + Date.now());
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+                const notification = document.getElementById('task-notification');
+                if (data.pending_count > 0) {
+                    notification.style.display = 'flex';
+                } else {
+                    notification.style.display = 'none';
+                }
+            } catch (error) { console.error('Error checking tasks:', error); }
+        }
+        setInterval(checkTasks, 30000);
+        checkTasks();
     </script>
 
 </body>
