@@ -94,15 +94,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     break;
                 case 'update_php_config':
-                    $upload_max = trim($_POST['php_upload_max_filesize'] ?? '8M');
-                    $post_max = trim($_POST['php_post_max_size'] ?? '25M');
+                    $upload_max = strtoupper(trim($_POST['php_upload_max_filesize'] ?? '20M'));
+                    $post_max = strtoupper(trim($_POST['php_post_max_size'] ?? '25M'));
                     $max_file_uploads = (int)($_POST['php_max_file_uploads'] ?? 20);
-                    $memory_limit = trim($_POST['php_memory_limit'] ?? '128M');
-                    
-                    $pdo->prepare("UPDATE sys_sites SET php_upload_max_filesize = ?, php_post_max_size = ?, php_max_file_uploads = ?, php_memory_limit = ? WHERE id = ?")
-                        ->execute([$upload_max, $post_max, $max_file_uploads, $memory_limit, $siteId]);
-                        
-                    $taskType = 'SITE_UPDATE_PHP_SETTINGS';
+                    $memory_limit = strtoupper(trim($_POST['php_memory_limit'] ?? '128M'));
+
+                    // Estos valores acaban incrustados en el vhost de Apache: solo formato N[KMG]
+                    if (!preg_match('/^\d+[KMG]?$/', $upload_max)
+                        || !preg_match('/^\d+[KMG]?$/', $post_max)
+                        || !preg_match('/^(-1|\d+[KMG]?)$/', $memory_limit)
+                        || $max_file_uploads < 1) {
+                        $msg = "Valores PHP no válidos: usa un número con sufijo K, M o G (ej: 20M).";
+                        $msg_type = 'error';
+                    } else {
+                        $pdo->prepare("UPDATE sys_sites SET php_upload_max_filesize = ?, php_post_max_size = ?, php_max_file_uploads = ?, php_memory_limit = ? WHERE id = ?")
+                            ->execute([$upload_max, $post_max, $max_file_uploads, $memory_limit, $siteId]);
+
+                        $taskType = 'SITE_UPDATE_PHP_SETTINGS';
+                    }
                     break;
             }
 
@@ -276,7 +285,7 @@ if (hasDnsServers()) {
                         </form>
                         <?php if ($s['php_enabled'] == 1): ?>
                         <div style="margin-top: 4px;">
-                            <button type="button" class="btn btn-outline btn-sm" style="font-size: 0.8rem; padding: 2px 8px; color: var(--text-dim);" onclick="openPhpConfigModal(<?php echo $s['id']; ?>, '<?php echo htmlspecialchars($s['domain']); ?>', '<?php echo htmlspecialchars($s['php_upload_max_filesize'] ?? '8M'); ?>', '<?php echo htmlspecialchars($s['php_post_max_size'] ?? '25M'); ?>', <?php echo htmlspecialchars($s['php_max_file_uploads'] ?? 20); ?>, '<?php echo htmlspecialchars($s['php_memory_limit'] ?? '128M'); ?>')" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>
+                            <button type="button" class="btn btn-outline btn-sm" style="font-size: 0.8rem; padding: 2px 8px; color: var(--text-dim);" onclick="openPhpConfigModal(<?php echo $s['id']; ?>, '<?php echo htmlspecialchars($s['domain']); ?>', '<?php echo htmlspecialchars($s['php_upload_max_filesize'] ?? '20M'); ?>', '<?php echo htmlspecialchars($s['php_post_max_size'] ?? '25M'); ?>', <?php echo htmlspecialchars($s['php_max_file_uploads'] ?? 20); ?>, '<?php echo htmlspecialchars($s['php_memory_limit'] ?? '128M'); ?>')" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>
                                 ⚙️ Config PHP
                             </button>
                         </div>
@@ -380,7 +389,7 @@ if (hasDnsServers()) {
                     <input type="hidden" name="site_id" id="phpConfigSiteId">
                     
                     <div class="form-group" style="margin-bottom: 12px;">
-                        <label>upload_max_filesize (ej: 8M, 2G)</label>
+                        <label>upload_max_filesize (ej: 20M, 2G)</label>
                         <input type="text" name="php_upload_max_filesize" id="php_upload_max_filesize" required style="width:100%;">
                     </div>
                     

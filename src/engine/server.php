@@ -197,25 +197,31 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
             $stmt = $pdo->prepare("SELECT php_upload_max_filesize, php_post_max_size, php_max_file_uploads, php_memory_limit FROM sys_sites WHERE domain = ?");
             $stmt->execute([$domain]);
             $php_settings = $stmt->fetch(PDO::FETCH_ASSOC);
-            
+
             if ($php_settings) {
-                $admin_value = "";
-                if (!empty($php_settings['php_upload_max_filesize'])) {
-                    $admin_value .= "upload_max_filesize=" . $php_settings['php_upload_max_filesize'] . "\\n";
+                // Solo valores tipo "20M", "512K", "1G" o bytes; evita romper la sintaxis del vhost
+                $sizeOk = function ($v) { return is_string($v) && preg_match('/^\d+[KMG]?$/i', $v); };
+                $directives = [];
+                if ($sizeOk($php_settings['php_upload_max_filesize'] ?? null)) {
+                    $directives[] = "upload_max_filesize=" . $php_settings['php_upload_max_filesize'];
                 }
-                if (!empty($php_settings['php_post_max_size'])) {
-                    $admin_value .= "post_max_size=" . $php_settings['php_post_max_size'] . "\\n";
+                if ($sizeOk($php_settings['php_post_max_size'] ?? null)) {
+                    $directives[] = "post_max_size=" . $php_settings['php_post_max_size'];
                 }
-                if (!empty($php_settings['php_max_file_uploads'])) {
-                    $admin_value .= "max_file_uploads=" . $php_settings['php_max_file_uploads'] . "\\n";
+                if ((int)($php_settings['php_max_file_uploads'] ?? 0) > 0) {
+                    $directives[] = "max_file_uploads=" . (int)$php_settings['php_max_file_uploads'];
                 }
-                if (!empty($php_settings['php_memory_limit'])) {
-                    $admin_value .= "memory_limit=" . $php_settings['php_memory_limit'] . "\\n";
+                $mem = $php_settings['php_memory_limit'] ?? null;
+                if ($mem === '-1' || $sizeOk($mem)) {
+                    $directives[] = "memory_limit=" . $mem;
                 }
-                
-                $admin_value = rtrim($admin_value, "\\n");
-                if ($admin_value) {
-                    $vhost .= "    SetEnv PHP_ADMIN_VALUE \"$admin_value\"\n";
+
+                if ($directives) {
+                    // ProxyFCGISetEnvIf (no SetEnv): sus cadenas ap_expr convierten \n en salto de
+                    // línea real, que es el separador que exige PHP-FPM para valores múltiples.
+                    // Con SetEnv el \n llegaba literal y FPM aplicaba todo como un único valor
+                    // corrupto de upload_max_filesize (interpretado como 8 bytes).
+                    $vhost .= "    ProxyFCGISetEnvIf \"true\" PHP_ADMIN_VALUE \"" . implode('\\n', $directives) . "\"\n";
                 }
             }
         } catch (Exception $e) {
@@ -275,10 +281,23 @@ try {
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS backup_frequency ENUM('none', 'daily', 'weekly') DEFAULT 'none'");
 
     // Nuevas columnas para configuración PHP
-    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_upload_max_filesize VARCHAR(16) DEFAULT '8M'");
+    $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_upload_max_filesize VARCHAR(16) DEFAULT '20M'");
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_post_max_size VARCHAR(16) DEFAULT '25M'");
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_max_file_uploads INT DEFAULT 20");
     $pdo->exec("ALTER TABLE sys_sites ADD COLUMN IF NOT EXISTS php_memory_limit VARCHAR(16) DEFAULT '128M'");
+
+    // Migración 1.4.33: el SetEnv roto dejaba upload_max_filesize en 8 bytes. Subir el
+    // default antiguo (8M) a 20M y regenerar todos los vhosts con la directiva corregida.
+    $fixDone = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'migration_php_limits_20m'")->fetchColumn();
+    if (!$fixDone) {
+        $pdo->exec("UPDATE sys_sites SET php_upload_max_filesize = '20M' WHERE php_upload_max_filesize IS NULL OR php_upload_max_filesize IN ('8M', '8')");
+        $stmtTask = $pdo->prepare("INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SITE_UPDATE_PHP_SETTINGS', ?, 'pending')");
+        foreach ($pdo->query("SELECT domain FROM sys_sites")->fetchAll(PDO::FETCH_COLUMN) as $migDomain) {
+            $stmtTask->execute([json_encode(['domain' => $migDomain])]);
+        }
+        $pdo->exec("INSERT IGNORE INTO sys_settings (setting_key, setting_value) VALUES ('migration_php_limits_20m', '1')");
+        echo "Migración PHP: límites por defecto a 20M y vhosts encolados para regenerar.\n";
+    }
 
 } catch (Exception $e) {
     // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root
