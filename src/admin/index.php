@@ -171,19 +171,22 @@ $localDomains = array_column($sites, 'domain');
 $apiZones = [];
 $apiAvailableZones = [];
 if (hasDnsServers()) {
-    $resZones = dnsApiRequest('/api-dns/zones', 'GET');
-    if ($resZones['code'] === 200) {
-        $dataZones = json_decode($resZones['response'], true);
-        $rawZones = $dataZones['zones'] ?? $dataZones['data'] ?? [];
-        foreach ($rawZones as $z) {
-            $domain = is_array($z) ? ($z['domain'] ?? '') : $z;
-            if ($domain) {
-                $apiZones[] = $domain;
-                if (!in_array($domain, $localDomains)) {
-                    $apiAvailableZones[] = $domain;
-                }
-            }
-        }
+    $zonesData = getDnsZonesData();
+    // Se ofrecen solo las zonas de este servidor y las que no son de nadie. Antes
+    // salían todas las del cluster, incluidos dominios de otros servidores de
+    // hosting, lo que con muchos dominios hacía el desplegable inservible.
+    $filterZones = isDnsFilterEnabled() && $zonesData['has_server'];
+    $mySlug = getDnsNodeSlug();
+
+    foreach ($zonesData['zones'] as $z) {
+        $domain = $z['domain'] ?? '';
+        if (!$domain) continue;
+
+        $apiZones[] = $domain;
+        if (in_array($domain, $localDomains)) continue;
+        if ($filterZones && !in_array($z['server_slug'], ['', $mySlug], true)) continue;
+
+        $apiAvailableZones[] = $domain;
     }
 }
 ?>

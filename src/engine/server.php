@@ -60,88 +60,6 @@ function getPublicIP() {
     return trim($ip);
 }
 
-function syncDnsRecord($action, $domain) {
-    if (!defined('DNS_TOKEN') || !defined('DNS_SERVER')) return;
-    $servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
-    if (empty($servers) || empty(DNS_TOKEN)) return;
-
-    $publicIP = getPublicIP();
-    if (empty($publicIP)) return;
-
-    foreach ($servers as $server) {
-        $baseUrl = (strpos($server, 'http') === 0) ? rtrim($server, '/') : "http://" . rtrim($server, '/');
-        
-        // Usamos el endpoint /api-dns/query/ para ver si el dominio ya pertenece a alguna zona
-        $ch = curl_init("$baseUrl/api-dns/query/" . urlencode($domain));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        $res = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode === 404 && $action === 'add') {
-            // No existe ni el registro ni una zona padre, creamos zona nueva
-            $payload = json_encode(['domain' => $domain, 'ip' => $publicIP]);
-            $chAdd = curl_init("$baseUrl/api-dns/add");
-            curl_setopt($chAdd, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($chAdd, CURLOPT_POST, true);
-            curl_setopt($chAdd, CURLOPT_POSTFIELDS, $payload);
-            curl_setopt($chAdd, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
-            curl_exec($chAdd);
-            curl_close($chAdd);
-        }
-
-        if ($httpCode === 200 && $res) {
-            $data = json_decode($res, true);
-            if (!empty($data['success'])) {
-                $foundRecords = $data['results'] ?? $data['records'] ?? [];
-                $targetZone = $data['zone'] ?? $domain;
-                $targetName = $data['name'] ?? '@';
-
-                if ($action === 'add') {
-                    $exists = false;
-                    foreach ($foundRecords as $r) {
-                        if ($r['type'] === 'A' && $r['content'] === $publicIP) {
-                            $exists = true;
-                            break;
-                        }
-                    }
-                    if (!$exists) {
-                        $payload = json_encode([
-                            'domain' => $targetZone,
-                            'name' => $targetName,
-                            'type' => 'A',
-                            'content' => $publicIP,
-                            'ttl' => 3600
-                        ]);
-                        $ch2 = curl_init("$baseUrl/api-dns/record/add");
-                        curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
-                        curl_setopt($ch2, CURLOPT_POST, true);
-                        curl_setopt($ch2, CURLOPT_POSTFIELDS, $payload);
-                        curl_setopt($ch2, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
-                        curl_exec($ch2);
-                        curl_close($ch2);
-                    }
-                } elseif ($action === 'del') {
-                    foreach ($foundRecords as $r) {
-                        if ($r['type'] === 'A' && $r['content'] === $publicIP) {
-                            $payload = json_encode(['id' => $r['id'] ?? null, 'domain' => $targetZone, 'name' => $targetName, 'type' => 'A']);
-                            $ch2 = curl_init("$baseUrl/api-dns/record/del");
-                            curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
-                            curl_setopt($ch2, CURLOPT_POST, true);
-                            curl_setopt($ch2, CURLOPT_POSTFIELDS, $payload);
-                            curl_setopt($ch2, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN, "Content-Type: application/json"]);
-                            curl_exec($ch2);
-                            curl_close($ch2);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 function checkExternalDNS($domain, $expectedIP) {
     // Usar dig con el resolver de Google para evitar caché local/hosts
     $output = shell_exec("/usr/bin/dig @8.8.8.8 " . escapeshellarg($domain) . " +short");
@@ -368,15 +286,13 @@ foreach ($tasks as $task) {
             $msg = "Site $domain created.";
             $success = true;
 
-            // --- Sincronizar DNS (Desactivado por petición del usuario) ---
-            // syncDnsRecord('add', $domain);
-            // syncDnsRecord('add', "www.$domain");
-            // syncDnsRecord('add', "pma.$domain");
-            // syncDnsRecord('add', "phpmyadmin.$domain");
 
             // --- Auto-encolar SSL ---
             $publicIP = getPublicIP();
-            $dnsManaged = defined('DNS_TOKEN') && defined('DNS_SERVER') && !empty(DNS_TOKEN) && !empty(DNS_SERVER);
+            // hasDnsServers() cubre tanto sys_dns_servers como las constantes legacy.
+            // Mirar solo las constantes daba falso en toda instalación nueva, donde el
+            // DNS sí está gestionado pero desde la tabla.
+            $dnsManaged = hasDnsServers();
             
             if ($dnsManaged || ($publicIP && checkExternalDNS($domain, $publicIP))) {
                 // Verificar si ya hay una tarea SSL pendiente para este dominio para no duplicar
@@ -622,8 +538,6 @@ foreach ($tasks as $task) {
             
             $pdo->prepare("DELETE FROM sys_sites WHERE domain = ?")->execute([$domain]);
             
-            // --- Limpiar DNS (Desactivado por petición del usuario) ---
-            // syncDnsRecord('del', $domain);
             
             // 4. Limpiar bases de datos asociadas
             $dbs = $pdo->prepare("SELECT db_name, db_user FROM sys_databases WHERE site_id = ?");
@@ -1177,6 +1091,59 @@ foreach ($tasks as $task) {
     echo "Task $taskId ($domain): $status - $msg\n";
 }
 
+// --- Reenvío de escrituras DNS que no llegaron a algún nodo (cada ejecución) ---
+// El panel escribe en todos los nodos, pero si uno estaba caído la escritura se
+// perdía sin que nadie se enterase. Ahora queda encolada aquí y se reintenta con
+// backoff hasta que entra. Va fuera del bloque de 5 minutos a propósito: cuanto
+// antes converjan los nodos, mejor.
+try {
+    dnsOutboxEnsureTable($pdo);
+    $pendingOutbox = $pdo->query("SELECT * FROM sys_dns_outbox WHERE next_retry_at <= NOW() ORDER BY id ASC LIMIT 50")->fetchAll();
+
+    if (!empty($pendingOutbox)) {
+        $serversById = [];
+        foreach (getDnsServers() as $s) {
+            $serversById[(int)$s['id']] = $s;
+        }
+
+        foreach ($pendingOutbox as $row) {
+            $srv = $serversById[(int)$row['dns_server_id']] ?? null;
+
+            // Servidor borrado o desactivado: la entrada ya no tiene destino.
+            if (!$srv) {
+                $pdo->prepare("DELETE FROM sys_dns_outbox WHERE id = ?")->execute([$row['id']]);
+                continue;
+            }
+
+            $payload = $row['payload'] === null ? null : json_decode($row['payload'], true);
+            $res = dnsApiRequestOnServer($srv['url'], $row['endpoint'], 'POST', $payload, $srv['token']);
+
+            if ($res['code'] >= 200 && $res['code'] < 300) {
+                $pdo->prepare("DELETE FROM sys_dns_outbox WHERE id = ?")->execute([$row['id']]);
+                echo "Outbox: reenviado {$row['endpoint']} a {$srv['name']}.\n";
+                continue;
+            }
+
+            $attempts = (int)$row['attempts'] + 1;
+
+            if ($attempts >= 10) {
+                // Nos rendimos con esta entrada. No se pierde la detección: el
+                // monitor por hash de más abajo seguirá marcando la zona como
+                // desincronizada hasta que alguien sincronice.
+                $pdo->prepare("DELETE FROM sys_dns_outbox WHERE id = ?")->execute([$row['id']]);
+                echo "Outbox: descartado {$row['endpoint']} para {$srv['name']} tras $attempts intentos (último código {$res['code']}).\n";
+                continue;
+            }
+
+            $backoff = min(3600, 60 * (2 ** min($attempts, 6)));
+            $pdo->prepare("UPDATE sys_dns_outbox SET attempts = ?, last_code = ?, next_retry_at = ? WHERE id = ?")
+                ->execute([$attempts, $res['code'] ?: null, date('Y-m-d H:i:s', time() + $backoff), $row['id']]);
+        }
+    }
+} catch (Exception $e) {
+    echo "Outbox: error procesando la cola de reenvío: " . $e->getMessage() . "\n";
+}
+
 // --- Mantenimiento Periódico: Sincronización DNS (Cada 5 minutos) ---
 $lastDnsCheck = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'last_global_dns_sync_check'")->fetchColumn();
 if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
@@ -1186,15 +1153,26 @@ if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
     if (count($dnsServers) > 1) {
         $primary = $dnsServers[0];
         
-        // 1. Obtener estados de zonas de TODOS los servidores (para comparar timestamps/seriales)
+        // 1. Estado de zonas de TODOS los servidores.
+        //
+        // Se compara records_hash, la huella de contenido que calcula la API. Antes se
+        // comparaba updated_at, que no sirve: el motor nunca hace UPDATE sobre
+        // sys_dns_zones, así que es la fecha de creación, y una zona se crea en el
+        // secundario más tarde que en el primario. Los timestamps no coincidían nunca,
+        // se entraba al "deep check" de todos los sitios cada 5 minutos, y aun así se
+        // comparaba solo name|type|content: un TTL o una prioridad de MX distinta entre
+        // nodos no se detectaba jamás. El hash incluye ttl y priority.
         $srvZones = [];
+        $hashesAvailable = true;
         foreach ($dnsServers as $srv) {
             $res = dnsApiRequestOnServer($srv['url'], '/api-dns/zones', 'GET', null, $srv['token']);
             if ($res['code'] === 200) {
                 $data = json_decode($res['response'], true);
                 $raw = $data['zones'] ?? $data['data'] ?? [];
+                $srvZones[$srv['id']] = [];
                 foreach ($raw as $z) {
-                    $srvZones[$srv['id']][$z['domain']] = $z['updated_at'] ?? '0';
+                    if (!array_key_exists('records_hash', $z)) $hashesAvailable = false;
+                    $srvZones[$srv['id']][$z['domain']] = $z['records_hash'] ?? null;
                 }
             } else {
                 $srvZones[$srv['id']] = null; // Inaccesible
@@ -1202,6 +1180,10 @@ if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
         }
 
         $primaryZones = $srvZones[$primary['id']] ?? [];
+
+        if (!$hashesAvailable) {
+            echo "Aviso: algún nodo DNS aún no reporta records_hash (binario antiguo). Solo se comprobará el conjunto de zonas.\n";
+        }
 
         // 2. Actualizar estado de los servidores secundarios (Zonas globales)
         foreach ($dnsServers as $idx => $srv) {
@@ -1225,65 +1207,42 @@ if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
                 ->execute([$srvStatus, $srv['id']]);
         }
 
-        // 3. Verificar cada sitio individualmente de forma optimizada
+        // 3. Verificar cada sitio comparando la huella de contenido entre nodos.
+        // Ya no hace falta ningún "deep check": los hashes vienen en la respuesta que
+        // acabamos de pedir, así que esto no cuesta ni una petición extra.
         $sites = $pdo->query("SELECT id, domain, dns_sync_status, dns_last_sync FROM sys_sites WHERE status = 'active'")->fetchAll();
-        foreach ($sites as $site) {
-            $d = $site['domain'];
-            if (!isset($primaryZones[$d])) continue;
+        $primaryZoneNames = array_keys($primaryZones);
 
-            $primaryTS = $primaryZones[$d];
-            $syncNeeded = false;
-            
-            // Comprobar si algún servidor secundario tiene un timestamp diferente
-            foreach ($dnsServers as $idx => $srv) {
-                if ($idx === 0) continue;
-                $otherTS = $srvZones[$srv['id']][$d] ?? null;
-                if ($otherTS !== $primaryTS) {
-                    $syncNeeded = true;
-                    break;
-                }
-            }
+        foreach ($sites as $site) {
+            // Un sitio casi nunca es una zona: 'www.example.com' vive dentro de la zona
+            // 'example.com'. Cruzando por nombre exacto, la mayoría de los
+            // sitios no se comprobaba nunca y su desincronización pasaba desapercibida.
+            $d = findLongestZoneSuffix($site['domain'], $primaryZoneNames);
+            if ($d === null) continue;
 
             $currentStatus = 'ok';
-            if ($syncNeeded) {
-                // SOLO si hay discrepancia de timestamps, entramos a auditar registros (Deep Check)
-                $resRS = dnsApiRequestOnServer($primary['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $primary['token']);
-                if ($resRS['code'] === 200) {
-                    $rSData = json_decode($resRS['response'], true);
-                    $rS = $rSData['records'] ?? [];
-                    
-                    if (!empty($rS)) {
-                        $mH = [];
-                        foreach ((array)$rS as $r) {
-                            if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
-                            $mH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
-                        }
 
-                        foreach ($dnsServers as $idx => $srv) {
-                            if ($idx === 0) continue;
-                            if (($srvZones[$srv['id']][$d] ?? null) === $primaryTS) continue; // Saltar si este ya coincide
+            if ($hashesAvailable) {
+                $primaryHash = $primaryZones[$d];
 
-                            $resRT = dnsApiRequestOnServer($srv['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $srv['token']);
-                            if ($resRT['code'] !== 200) {
-                                $currentStatus = 'error_connection';
-                                break;
-                            }
-                            $rTData = json_decode($resRT['response'], true);
-                            $rT = $rTData['records'] ?? [];
-                            $oH = [];
-                            foreach ((array)$rT as $r) {
-                                if (($r['type'] ?? '') === 'SOA' || ($r['type'] ?? '') === 'NS') continue;
-                                $oH[] = strtolower(trim($r['name'] ?? '@')) . '|' . strtoupper(trim($r['type'] ?? '')) . '|' . trim($r['content'] ?? '');
-                            }
-                            if (count($mH) !== count($oH) || !empty(array_diff($mH, $oH)) || !empty(array_diff($oH, $mH))) {
-                                $currentStatus = 'desync';
-                                break;
-                            }
-                        }
+                foreach ($dnsServers as $idx => $srv) {
+                    if ($idx === 0) continue;
+
+                    if ($srvZones[$srv['id']] === null) {
+                        $currentStatus = 'error_connection';
+                        break;
+                    }
+                    if (!array_key_exists($d, $srvZones[$srv['id']])) {
+                        $currentStatus = 'desync'; // la zona ni siquiera existe en este nodo
+                        break;
+                    }
+                    if ($srvZones[$srv['id']][$d] !== $primaryHash) {
+                        $currentStatus = 'desync';
+                        break;
                     }
                 }
             }
-            
+
             // Solo actualizar si el estado cambia o han pasado más de 24h desde el último check
             if ($currentStatus !== $site['dns_sync_status'] || strtotime($site['dns_last_sync'] ?? '0') < (time() - 86400)) {
                 $pdo->prepare("UPDATE sys_sites SET dns_sync_status = ?, dns_last_sync = NOW() WHERE id = ?")

@@ -33,10 +33,14 @@ checkAuth();
         $healthColor = 'var(--success)';
         if ($dnsHealth['status'] === 'warning') $healthColor = 'var(--warning)';
         if ($dnsHealth['status'] === 'error') $healthColor = 'var(--error)';
+        $outboxPending = dnsOutboxPendingCount();
     ?>
         <a href="dns.php" class="<?php echo ($current_page === 'dns.php') ? 'active' : ''; ?>" style="display: flex; align-items: center; gap: 6px;">
-            DNS 
+            DNS
             <span style="width: 8px; height: 8px; border-radius: 50%; background: <?php echo $healthColor; ?>;" title="<?php echo htmlspecialchars($dnsHealth['message']); ?>"></span>
+            <?php if ($outboxPending > 0): ?>
+                <span style="background: var(--warning); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 8px;" title="<?php echo $outboxPending; ?> escritura(s) DNS pendientes de reenviar a algún nodo. El motor las reintenta automáticamente.">↻ <?php echo $outboxPending; ?></span>
+            <?php endif; ?>
         </a>
     <?php endif; ?>
     

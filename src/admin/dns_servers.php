@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'config.php';
+require_once 'dns_utils.php';
 $pdo = getPDO();
 
 // Auto-crear tabla si no existe
@@ -71,6 +72,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("UPDATE sys_dns_servers SET is_active = ? WHERE id = ?")->execute([$new, $id]);
             $msg = $new === 1 ? "Servidor activado." : "Servidor desactivado.";
             $msg_type = 'success';
+        }
+    } elseif ($action === 'save_identity') {
+        // Identidad de ESTE panel dentro del cluster, y si la pantalla DNS filtra por
+        // ella. El filtro es solo de vista: desactivarlo devuelve el panel al
+        // comportamiento de siempre (todas las zonas del cluster, sin selector).
+        $slug = strtolower(trim($_POST['node_slug'] ?? ''));
+        $filterOn = isset($_POST['filter_enabled']) ? '1' : '0';
+
+        if ($slug !== '' && !preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/', $slug)) {
+            $msg = "Identificador no válido. Usa letras, números, guiones o puntos.";
+        } else {
+            try {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS sys_settings (
+                    setting_key VARCHAR(64) PRIMARY KEY,
+                    setting_value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )");
+                if ($slug !== '') {
+                    $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('dns_node_slug', ?)")->execute([$slug]);
+                }
+                $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('dns_filter_enabled', ?)")->execute([$filterOn]);
+                $msg = "Identidad guardada.";
+                $msg_type = 'success';
+            } catch (Exception $e) {
+                $msg = "Error al guardar: " . $e->getMessage();
+            }
         }
     } elseif ($action === 'test') {
         $url = rtrim(trim($_POST['test_url'] ?? ''), '/');
@@ -155,6 +182,32 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
         <p style="color: var(--text-dim); margin: -10px 0 24px 0; font-size: 0.9rem;">
             Configura aquí los servidores DNS que administras. Cada servidor necesita su URL y un token Bearer válido para la API.
         </p>
+
+        <?php
+        $currentSlug = getDnsNodeSlug();
+        $filterEnabled = isDnsFilterEnabled();
+        ?>
+        <div class="panel" style="margin-bottom: 24px;">
+            <h3 style="margin: 0 0 6px 0; font-size: 1.05rem;">🖥️ Identidad de este servidor</h3>
+            <p style="color: var(--text-dim); margin: 0 0 16px 0; font-size: 0.85rem;">
+                El cluster DNS es compartido por todos los paneles de hosting. Este identificador
+                marca qué zonas son de este servidor, para que la pantalla DNS muestre por defecto
+                solo las suyas. <strong>No restringe nada</strong>: desde aquí se puede seguir
+                viendo y editando cualquier zona eligiendo «Todas» en el selector.
+            </p>
+            <form method="POST" style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+                <input type="hidden" name="action" value="save_identity">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem;">
+                    Identificador
+                    <input type="text" name="node_slug" value="<?php echo htmlspecialchars($currentSlug); ?>" placeholder="srv1" style="width: 180px;">
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer;">
+                    <input type="checkbox" name="filter_enabled" value="1" <?php echo $filterEnabled ? 'checked' : ''; ?>>
+                    Filtrar la pantalla DNS por este servidor
+                </label>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </form>
+        </div>
 
         <!-- Formulario Añadir Servidor -->
         <div id="form-add-server" style="display: none; background: rgba(79, 70, 229, 0.05); padding: 24px; border-radius: 12px; border: 1px solid rgba(79, 70, 229, 0.3); margin-bottom: 32px; box-shadow: 0 0 20px rgba(79, 70, 229, 0.1);">

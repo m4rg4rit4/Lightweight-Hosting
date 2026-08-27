@@ -8,6 +8,7 @@
  */
 
 require_once __DIR__ . '/../admin/config.php';
+require_once __DIR__ . '/../admin/dns_utils.php';
 
 $domain = getenv('CERTBOT_DOMAIN');
 $validation = getenv('CERTBOT_VALIDATION');
@@ -21,50 +22,28 @@ if (!$domain || !$validation) {
 // Si el dominio es 'example.com', el name es '_acme-challenge'
 // Certbot nos da el dominio completo, necesitamos encontrar la zona base.
 
-$servers = array_filter(array_map('trim', explode(',', DNS_SERVER)));
+// Los servidores salen de sys_dns_servers, con el fallback a constantes legacy que
+// ya implementa getDnsServers(). Antes se leía DNS_SERVER/DNS_TOKEN directamente y el
+// config.php actual ya no las define: en una instalación nueva esto moría con un
+// fatal error, dejando la validación DNS-01 rota.
+$servers = getDnsServers();
 if (empty($servers)) exit(1);
 
-// Helper para peticiones
+// Helper para peticiones: escribe en TODOS los nodos, cada uno con su propio token.
 function dnsApiRequestLocal($endpoint, $method = 'POST', $data = null) {
     global $servers;
-    $results = [];
-    foreach ($servers as $sUrl) {
-        $baseUrl = (strpos($sUrl, 'http') === 0) ? rtrim($sUrl, '/') : "http://" . rtrim($sUrl, '/');
-        $url = $baseUrl . $endpoint;
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        $headers = ["Authorization: Bearer " . DNS_TOKEN, "Accept: application/json"];
-        if ($method === 'POST') {
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-            $headers[] = "Content-Type: application/json";
-        }
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        $res = curl_exec($ch);
-        curl_close($ch);
+    foreach ($servers as $s) {
+        dnsApiRequestOnServer($s['url'], $endpoint, $method, $data, $s['token']);
     }
 }
 
 // 1. Identificar la zona
 // Buscamos cuál de nuestras zonas es sufijo de CERTBOT_DOMAIN
-$resZones = [];
-$baseUrl = (strpos($servers[0], 'http') === 0) ? rtrim($servers[0], '/') : "http://" . rtrim($servers[0], '/');
-$ch = curl_init($baseUrl . '/api-dns/zones');
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer " . DNS_TOKEN]);
-$res = curl_exec($ch);
-curl_close($ch);
-$data = json_decode($res, true);
+$res = dnsApiRequestOnServer($servers[0]['url'], '/api-dns/zones', 'GET', null, $servers[0]['token']);
+$data = json_decode($res['response'], true);
 $zones = array_column($data['zones'] ?? [], 'domain');
 
-$foundZone = null;
-foreach ($zones as $z) {
-    if ($domain === $z || (strpos($domain, '.' . $z) !== false && substr($domain, -strlen('.' . $z)) === '.' . $z)) {
-        $foundZone = $z;
-        break;
-    }
-}
+$foundZone = findLongestZoneSuffix($domain, $zones);
 
 if (!$foundZone) exit(1);
 
