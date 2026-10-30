@@ -79,22 +79,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $res = dnsApiRequest('/api-dns/add', 'POST', ['domain' => $newZone, 'ip' => $targetIp, 'server' => $newZoneServer]);
         if ($res['code'] === 200) {
-            $msg = "Zona '$newZone' añadida exitosamente.";
+            $msg = "Zona '$newZone' encolada para publicar en los servidores DNS.";
             $msg_type = 'success';
             $domain_to_redirect = $newZone;
 
-            // Añadir registros NS para todos los servidores configurados
-            foreach ($servers as $sUrl) {
-                $nsHost = parse_url($sUrl, PHP_URL_HOST);
-                if ($nsHost) {
-                    dnsApiRequest('/api-dns/record/add', 'POST', [
-                        'domain' => $newZone,
-                        'name' => '@',
-                        'type' => 'NS',
-                        'content' => $nsHost . '.'
-                    ]);
-                }
-            }
+
         } else {
             $errData = @json_decode($res['response'], true);
             $detail = $errData['message'] ?? $res['error'] ?? "Cód {$res['code']}";
@@ -106,24 +95,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     elseif ($action === 'assign_server') {
-        // Reasignar una zona a otro servidor. Es solo una etiqueta de listado: la zona
-        // se sigue pudiendo editar desde cualquier panel, esté asignada a quien esté.
         $d = trim($_POST['domain'] ?? '');
-        // El campo libre gana al desplegable: sirve para asignar a un servidor que
-        // todavía no tiene ninguna zona y por tanto no aparece en la lista.
+        $intent = $_POST['assignment_intent'] ?? 'transfer';
         $slug = strtolower(trim($_POST['server_other'] ?? ''));
         if ($slug === '') $slug = strtolower(trim($_POST['server'] ?? ''));
+        if ($intent === 'release') $slug = '';
+        if ($intent === 'claim') $slug = getDnsNodeSlug();
+        if ($intent === 'reconcile') {
+            $state = getDnsAssignmentState($d);
+            $slug = $state['primary']['ok'] ? $state['primary']['server'] : '';
+        }
+        $revision = $_POST['expected_revision'] ?? null;
 
         if ($d === '') {
             $msg = "Falta el dominio.";
         } elseif ($slug !== '' && !preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/', $slug)) {
             $msg = "Nombre de servidor no válido. Usa letras, números, guiones o puntos.";
         } else {
-            $res = dnsApiRequest('/api-dns/zone/server', 'POST', ['domain' => $d, 'server' => $slug]);
+            $res = queueDnsAssignment($d, $slug, $revision);
             if ($res['code'] === 200) {
                 $msg = $slug === ''
-                    ? "Zona '$d' marcada como sin asignar."
-                    : "Zona '$d' asignada a '$slug'.";
+                    ? "Cambio de asignación de '$d' encolado."
+                    : "Asignación de '$d' a '$slug' encolada.";
                 $msg_type = 'success';
             } else {
                 $errData = @json_decode($res['response'], true);
@@ -157,8 +150,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $res = dnsApiRequest('/api-dns/delete', 'POST', ['domain' => $d]);
             if ($res['code'] === 200) {
-                $failed = array_filter($res['nodes'] ?? [], function($n) { return empty($n['ok']); });
-                $msg = "Zona '$d' encolada para borrado en " . count($res['nodes'] ?? []) . " nodo(s). Desaparecerá en menos de un minuto.";
+                $failed = array_filter($res['nodes'] ?? [], function($n) { return ($n['status'] ?? '') === 'error'; });
+                $msg = "Zona '$d' encolada para borrado en " . count($res['nodes'] ?? []) . " nodo(s). Consulta el avance de cada servidor en Tareas.";
                 if (!empty($failed)) {
                     $msg .= " " . count($failed) . " nodo(s) no respondieron; se reintentará automáticamente.";
                 }
@@ -203,19 +196,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = "No hay zonas sin asignar cuyo nombre coincida con un sitio de este servidor.";
             $msg_type = 'info';
         } else {
-            $res = dnsApiRequest('/api-dns/zone/server/bulk', 'POST', [
-                'domains' => $toClaim,
-                'server' => $mySlug,
-                'only_unassigned' => true
-            ]);
-            if ($res['code'] === 200) {
-                $data = @json_decode($res['response'], true);
-                $n = $data['updated'] ?? count($toClaim);
-                $msg = "$n zona(s) asignadas a '$mySlug'.";
-                $msg_type = 'success';
-            } else {
-                $msg = "No se pudieron reclamar las zonas (Cód {$res['code']}).";
+            $versions = [];
+            foreach (getDnsZonesData()['zones'] as $zone) $versions[$zone['domain']] = $zone['assignment_revision'] ?? null;
+            $queued = 0; $failed = 0;
+            foreach ($toClaim as $d) {
+                $res = queueDnsAssignment($d, $mySlug, $versions[$d] ?? null);
+                if ($res['code'] === 200) $queued++; else $failed++;
             }
+            $msg = "$queued reclamación(es) encoladas para '$mySlug'. Cada zona se comprobará antes de asignarla.";
+            if ($failed) $msg .= " No se pudieron encolar $failed zona(s). Actualiza la página.";
+            $msg_type = $failed ? 'warning' : 'info';
         }
     }
 
@@ -243,7 +233,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             
             if ($res['code'] === 200) {
-                $msg = "Registro $type insertado correctamente.";
+                $msg = "Registro $type encolado para publicar en los servidores DNS.";
                 $msg_type = 'success';
             } else {
                 $errData = @json_decode($res['response'], true);
@@ -280,7 +270,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $res = dnsApiRequest($action === 'edit_record' ? '/api-dns/record/edit' : '/api-dns/record/add', 'POST', $payload);
         if ($res['code'] === 200) {
-            $msg = "Configuración SOA actualizada correctamente.";
+            $msg = "Configuración SOA encolada para publicar en los servidores DNS.";
             $msg_type = 'success';
         } else {
             $errData = @json_decode($res['response'], true);
@@ -318,7 +308,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             
             if ($res['code'] === 200) {
-                $msg = "Registro actualizado correctamente.";
+                $msg = "Actualización encolada para publicar en los servidores DNS.";
                 $msg_type = 'success';
             } else {
                 $errData = @json_decode($res['response'], true);
@@ -336,7 +326,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         
             if ($res['code'] === 200) {
-                $msg = "Registro borrado correctamente.";
+                $msg = "Borrado encolado para publicar en los servidores DNS.";
                 $msg_type = 'success';
             } else {
                 $errData = @json_decode($res['response'], true);
@@ -429,12 +419,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'old_content' => $adjRec['content']
                         ];
 
-                        dnsApiRequestOnServer($sUrl, '/api-dns/record/edit', 'POST', $payload1, $sToken);
-                        dnsApiRequestOnServer($sUrl, '/api-dns/record/edit', 'POST', $payload2, $sToken);
+                        dnsApiRequest('/api-dns/record/edit', 'POST', $payload1, [$server]);
+                        dnsApiRequest('/api-dns/record/edit', 'POST', $payload2, [$server]);
                         $count++;
                     }
 
-                    $msg = "Orden actualizado en $count servidor(es) DNS.";
+                    $msg = "Orden encolado en $count servidor(es) DNS.";
                     $msg_type = 'success';
                 } else {
                     $msg = "No se puede mover el registro en esa dirección.";
@@ -443,162 +433,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
         elseif ($action === 'sync_dns') {
-            $scope = $_POST['scope'] ?? 'all';
-            $domain = $_POST['domain'] ?? '';
-            $source = $dnsServers[0];
-            $count = 0;
-            
-            foreach ($dnsServers as $idx => $targetSrv) {
-                if ($idx === 0) continue;
-                $sUrl = $targetSrv['url'];
-                $sToken = $targetSrv['token'];
-                
-                // Obtener zonas de ambos
-                $resS = dnsApiRequestOnServer($source['url'], '/api-dns/zones', 'GET', null, $source['token']);
-                $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET', null, $sToken);
-                if ($resS['code'] !== 200 || $resT['code'] !== 200) continue;
-
-                $zSData = json_decode($resS['response'], true);
-                $zS = (array)($zSData['zones'] ?? $zSData['data'] ?? []);
-                $zTData = json_decode($resT['response'], true);
-                $zT = (array)($zTData['zones'] ?? $zTData['data'] ?? []);
-                
-                $zSNames = (!empty($zS) && isset($zS[0]['domain'])) ? (array)array_column($zS, 'domain') : (array)$zS;
-                $zTNames = (!empty($zT) && isset($zT[0]['domain'])) ? (array)array_column($zT, 'domain') : (array)$zT;
-
-                // Propietario de cada zona según el primario. Hay que replicarlo: si los
-                // nodos discrepan, el filtro del panel daría resultados distintos según
-                // qué nodo conteste.
-                $zSOwners = [];
-                foreach ($zS as $z) {
-                    if (is_array($z)) $zSOwners[$z['domain']] = strtolower(trim($z['server_slug'] ?? ''));
-                }
-                $zTOwners = [];
-                foreach ($zT as $z) {
-                    if (is_array($z)) $zTOwners[$z['domain']] = strtolower(trim($z['server_slug'] ?? ''));
-                }
-
-                if ($scope === 'all') {
-                    foreach ($zSNames as $z) {
-                        if (!in_array($z, $zTNames)) {
-                            $targetIp = '';
-                            $resRecs = dnsApiRequestOnServer($source['url'], '/api-dns/records/' . urlencode($z), 'GET', null, $source['token']);
-                            if ($resRecs['code'] === 200) {
-                                $recs = json_decode($resRecs['response'], true)['records'] ?? [];
-                                foreach ($recs as $r) {
-                                    if ($r['name'] === '@' && $r['type'] === 'A') {
-                                        $targetIp = $r['content'];
-                                        break;
-                                    }
-                                }
-                            }
-                            $rA = dnsApiRequestOnServer($sUrl, '/api-dns/add', 'POST', [
-                                'domain' => $z,
-                                'ip' => $targetIp,
-                                'server' => $zSOwners[$z] ?? ''
-                            ], $sToken);
-                            if ($rA['code'] === 200) $count++;
+            if (dnsOutboxPendingCount() > 0) {
+                $msg = "Hay publicaciones DNS pendientes. Espera a que terminen antes de copiar el estado del primer servidor.";
+                $msg_type = 'warning';
+            } else {
+                $scope = $_POST['scope'] ?? 'all';
+                $domain = trim($_POST['domain'] ?? '');
+                $source = $dnsServers[0];
+                $res = dnsApiRequestOnServer($source['url'], '/api-dns/zones', 'GET', null, $source['token']);
+                $zoneData = json_decode($res['response'] ?: '', true);
+                $zones = $zoneData['zones'] ?? null;
+                $count = 0; $errors = [];
+                if ($res['code'] !== 200 || !is_array($zones)) {
+                    $errors[] = 'No se pudieron leer las zonas del primer servidor.';
+                } else {
+                    foreach ($zones as $zone) {
+                        $d = $zone['domain'];
+                        if ($scope === 'domain' && $d !== $domain) continue;
+                        $recordsRes = dnsApiRequestOnServer($source['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $source['token']);
+                        $recordsData = json_decode($recordsRes['response'] ?: '', true);
+                        if ($recordsRes['code'] !== 200 || empty($recordsData['records'])) {
+                            $errors[] = "No se pudo leer la zona $d.";
+                            continue;
                         }
-                    }
-                    $resT = dnsApiRequestOnServer($sUrl, '/api-dns/zones', 'GET', null, $sToken);
-                    $zTData = json_decode($resT['response'], true);
-                    $zTNames = array_column($zTData['zones'] ?? [], 'domain');
-                    $zTOwners = [];
-                    foreach (($zTData['zones'] ?? []) as $z) {
-                        if (is_array($z)) $zTOwners[$z['domain']] = strtolower(trim($z['server_slug'] ?? ''));
+                        $targets = array_slice($dnsServers, 1);
+                        if (!$targets) continue;
+                        $queued = dnsApiRequest('/api-dns/zone/sync', 'POST', [
+                            'domain' => $d, 'server' => $zone['server_slug'] ?? '', 'assignment_revision' => $zone['assignment_revision'] ?? 0, 'records' => $recordsData['records']
+                        ], $targets);
+                        if ($queued['code'] === 200) $count += count($targets);
+                        else $errors[] = "No se pudo encolar la zona $d.";
                     }
                 }
-
-                $domainsToSync = ($scope === 'domain' && !empty($domain)) ? [$domain] : $zSNames;
-                foreach ($domainsToSync as $d) {
-                    if (!in_array($d, $zTNames)) continue;
-
-                    // Alinear el propietario si los nodos discrepan.
-                    if (isset($zSOwners[$d]) && ($zTOwners[$d] ?? '') !== $zSOwners[$d]) {
-                        $rO = dnsApiRequestOnServer($sUrl, '/api-dns/zone/server', 'POST', [
-                            'domain' => $d,
-                            'server' => $zSOwners[$d]
-                        ], $sToken);
-                        if ($rO['code'] === 200) $count++;
-                    }
-
-                    $resRS = dnsApiRequestOnServer($source['url'], '/api-dns/records/' . urlencode($d), 'GET', null, $source['token']);
-                    $resRT = dnsApiRequestOnServer($sUrl, '/api-dns/records/' . urlencode($d), 'GET', null, $sToken);
-                    if ($resRS['code'] === 200 && $resRT['code'] === 200) {
-                        $rS = (array)(json_decode($resRS['response'], true)['records'] ?? []);
-                        $rT = (array)(json_decode($resRT['response'], true)['records'] ?? []);
-                        
-                        // La huella incluye ttl y priority (ver dnsRecordFingerprint): antes
-                        // solo miraba name|type|content, así que un TTL distinto o una
-                        // prioridad de MX distinta entre nodos no se corregía nunca.
-                        $tHashes = array_map('dnsRecordFingerprint', $rT);
-                        $sHashes = array_map('dnsRecordFingerprint', $rS);
-
-                        // 0. Propagar el SOA. El bucle de registros lo salta, así que un SOA
-                        // personalizado en el primario nunca llegaba al secundario: al crear
-                        // la zona allí, /api-dns/add le genera uno por defecto y ahí se
-                        // quedaba. El contenido almacenado lleva el placeholder {SERIAL}, de
-                        // modo que se puede comparar tal cual: el serial real lo pone cada
-                        // nodo al generar el fichero de zona.
-                        $soaS = null; $soaT = null;
-                        foreach ($rS as $r) { if (($r['type'] ?? '') === 'SOA') { $soaS = $r; break; } }
-                        foreach ($rT as $r) { if (($r['type'] ?? '') === 'SOA') { $soaT = $r; break; } }
-
-                        if ($soaS && $soaT && trim($soaS['content'] ?? '') !== trim($soaT['content'] ?? '')) {
-                            $rSoa = dnsApiRequestOnServer($sUrl, '/api-dns/record/edit', 'POST', [
-                                'id' => 0,
-                                'domain' => $d,
-                                'name' => '@',
-                                'type' => 'SOA',
-                                'content' => $soaS['content'],
-                                'ttl' => $soaS['ttl'] ?? 3600,
-                                'old_name' => '@',
-                                'old_type' => 'SOA',
-                                'old_content' => $soaT['content']
-                            ], $sToken);
-                            if ($rSoa['code'] === 200) $count++;
-                        }
-
-                        // 1. Añadir los que faltan en el destino
-                        foreach ($rS as $rs) {
-                            if (($rs['type'] ?? '') === 'SOA' || ($rs['type'] ?? '') === 'NS') continue;
-
-                            $h = dnsRecordFingerprint($rs);
-                            if (!in_array($h, $tHashes)) {
-                                $rA = dnsApiRequestOnServer($sUrl, '/api-dns/record/add', 'POST', [
-                                    'domain' => $d,
-                                    'name' => $rs['name'],
-                                    'type' => $rs['type'],
-                                    'content' => $rs['content'],
-                                    'ttl' => $rs['ttl'],
-                                    'priority' => $rs['priority'] ?? null
-                                ], $sToken);
-                                if ($rA['code'] === 200) $count++;
-                            }
-                        }
-                        
-                        // 2. Borrar los que sobran en el destino
-                        foreach ($rT as $rt) {
-                            if (($rt['type'] ?? '') === 'SOA' || ($rt['type'] ?? '') === 'NS') continue;
-
-                            $h = dnsRecordFingerprint($rt);
-                            if (!in_array($h, $sHashes)) {
-                                $rD = dnsApiRequestOnServer($sUrl, '/api-dns/record/del', 'POST', [
-                                    'domain' => $d,
-                                    'id' => $rt['id'],
-                                    'name' => $rt['name'],
-                                    'type' => $rt['type'],
-                                    'content' => $rt['content']
-                                ], $sToken);
-                                if ($rD['code'] === 200) $count++;
-                            }
-                        }
-                    }
-                }
+                $msg = "$count tarea(s) de sincronización encoladas. Consulta la publicación por servidor en Tareas.";
+                if ($errors) $msg .= ' ' . implode(' ', $errors);
+                $msg_type = $errors ? 'warning' : 'info';
             }
-
-            $msg = "Sincronización completada. $count cambios aplicados en servidores secundarios.";
-            $msg_type = 'success';
         }
 
         $_SESSION['flash_msg'] = $msg;
@@ -902,29 +772,52 @@ if ($activeDomain && isset($_GET['export'])) {
                         <?php if ($filterActive && in_array($activeDomain, $zonesData['domains'])):
                             $currentOwner = $zoneOwners[$activeDomain] ?? '';
                         ?>
-                        <!-- Asignación de servidor. Solo cambia en qué panel se lista por
-                             defecto; la zona se sigue pudiendo editar desde cualquiera. -->
-                        <form method="POST" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 20px;">
-                            <input type="hidden" name="action" value="assign_server">
-                            <input type="hidden" name="domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
-                            <span style="font-size: 0.85rem; color: var(--text-dim);">🖥️ Servidor asignado:</span>
-                            <select name="server" style="padding: 6px 10px; background: var(--card, var(--bg)); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 0.85rem;">
-                                <option value="" <?php echo ($currentOwner === '') ? 'selected' : ''; ?>>— Sin asignar —</option>
-                                <?php
-                                $optionSlugs = $knownServers;
-                                if (!in_array($myServerSlug, $optionSlugs, true)) $optionSlugs[] = $myServerSlug;
-                                sort($optionSlugs);
-                                foreach ($optionSlugs as $slug):
-                                ?>
-                                    <option value="<?php echo htmlspecialchars($slug); ?>" <?php echo ($currentOwner === $slug) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($slug); ?><?php echo ($slug === $myServerSlug) ? ' (este servidor)' : ''; ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <input type="text" name="server_other" placeholder="…u otro servidor" style="padding: 6px 10px; background: var(--card, var(--bg)); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 0.85rem; width: 160px;" title="Para asignar a un servidor que todavía no tiene ninguna zona. Si lo rellenas, tiene prioridad sobre el desplegable.">
-                            <button type="submit" class="btn btn-outline btn-sm">Guardar</button>
-                            <span style="font-size: 0.75rem; color: var(--text-dim);">Solo cambia dónde se lista por defecto. Se puede editar desde cualquier panel.</span>
-                        </form>
+                        <?php
+                            $assignment = getDnsAssignmentState($activeDomain);
+                            $canAssign = $assignment['primary']['ok'] && !$assignment['pending'];
+                            if ($assignment['primary']['ok']) $currentOwner = $assignment['primary']['server'];
+                        ?>
+                        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px;">
+                            <strong>Servidor asignado: <?php echo htmlspecialchars($currentOwner ?: 'Sin asignar'); ?></strong>
+                            <p style="font-size: 0.8rem; color: var(--text-dim);">Esta asignación organiza el panel. Liberar la zona conserva sus registros DNS y el sitio web.</p>
+                            <?php foreach ($assignment['nodes'] as $node): ?>
+                                <div style="font-size: 0.85rem; margin: 4px 0;">
+                                    <?php echo htmlspecialchars($node['name']); ?>:
+                                    <?php echo htmlspecialchars($node['ok'] ? (($node['server'] ?: 'Sin asignar') . ' · versión ' . $node['revision']) : 'No se pudo consultar la asignación'); ?>
+                                </div>
+                            <?php endforeach; ?>
+                            <p style="font-size: 0.85rem;">
+                                <?php echo $assignment['pending'] ? 'Hay una actualización pendiente. Consulta su avance en Tareas.' : ($assignment['consistent'] ? 'Asignación confirmada en todos los DNS.' : 'La asignación no está confirmada en todos los DNS.'); ?>
+                            </p>
+                            <?php if ($assignment['conflict']): ?>
+                                <p style="color: var(--warning);">Una reclamación anterior encontró un conflicto. Se muestra la asignación actual; puedes volver a intentarlo.</p>
+                            <?php endif; ?>
+                            <form method="POST" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <input type="hidden" name="action" value="assign_server">
+                                <input type="hidden" name="domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
+                                <input type="hidden" name="expected_revision" value="<?php echo htmlspecialchars((string)($assignment['primary']['revision'] ?? '')); ?>">
+                                <?php if ($currentOwner !== $myServerSlug): ?>
+                                    <button name="assignment_intent" value="claim" class="btn btn-primary" <?php echo $canAssign ? '' : 'disabled'; ?>>Asignar a este servidor</button>
+                                <?php endif; ?>
+                                <select name="server" aria-label="Servidor de destino">
+                                    <?php
+                                    $optionSlugs = array_unique(array_merge($knownServers, [$myServerSlug], $currentOwner ? [$currentOwner] : []));
+                                    sort($optionSlugs);
+                                    foreach ($optionSlugs as $slug): ?>
+                                        <option value="<?php echo htmlspecialchars($slug); ?>" <?php echo $currentOwner === $slug ? 'selected' : ''; ?>><?php echo htmlspecialchars($slug); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <input type="text" name="server_other" placeholder="Otro servidor" aria-label="Nombre de otro servidor" pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}">
+                                <button name="assignment_intent" value="transfer" class="btn btn-outline" <?php echo $canAssign ? '' : 'disabled'; ?>>Cambiar servidor</button>
+                                <?php if ($currentOwner !== ''): ?>
+                                    <button name="assignment_intent" value="release" class="btn btn-outline" onclick="return confirm('¿Liberar la asignación de esta zona? Se conservarán los registros DNS y el sitio web.');" <?php echo $canAssign ? '' : 'disabled'; ?>>Liberar zona</button>
+                                <?php endif; ?>
+                                <?php if (!$assignment['consistent'] && $canAssign): ?>
+                                    <button name="assignment_intent" value="reconcile" class="btn btn-outline">Confirmar asignación en ambos DNS</button>
+                                <?php endif; ?>
+                            </form>
+                            <?php if (!$assignment['primary']['ok']): ?><p>No se puede cambiar la asignación mientras el DNS principal no responda.</p><?php endif; ?>
+                        </div>
                         <?php endif; ?>
 
                         <?php if ($exportContent): ?>

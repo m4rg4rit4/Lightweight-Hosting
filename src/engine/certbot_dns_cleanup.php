@@ -32,20 +32,9 @@ if (!$foundZone) exit(1);
 
 $name = ($domain === $foundZone) ? '_acme-challenge' : '_acme-challenge.' . substr($domain, 0, -(strlen($foundZone) + 1));
 
-// 2. Eliminar el registro TXT.
-// Se recorre nodo a nodo a propósito: el id de sys_dns_records es de cada nodo, así
-// que hay que leer los registros del mismo servidor al que luego se le pide el
-// borrado. No se manda 'domain' para no chocar con la validación de pertenencia de
-// la API, que aquí no aporta nada porque el id ya viene de ese mismo nodo.
-foreach ($servers as $s) {
-    $res = dnsApiRequestOnServer($s['url'], '/api-dns/records/' . urlencode($foundZone), 'GET', null, $s['token']);
-    if ($res['code'] !== 200) continue;
-
-    $recs = json_decode($res['response'], true)['records'] ?? [];
-
-    foreach ($recs as $r) {
-        if ($r['name'] === $name && $r['type'] === 'TXT' && trim($r['content'], '"') === $validation) {
-            dnsApiRequestOnServer($s['url'], '/api-dns/record/del', 'POST', ['id' => $r['id']], $s['token']);
-        }
-    }
-}
+// Cleanup is queued even for unavailable nodes. The Go job treats an already
+// absent TXT as success; natural keys remain valid after a snapshot repair.
+$res = dnsApiRequest('/api-dns/record/del', 'POST', [
+    'id' => 0, 'domain' => $foundZone, 'name' => $name, 'type' => 'TXT', 'content' => $validation
+]);
+exit($res['code'] === 200 ? 0 : 1);

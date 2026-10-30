@@ -1091,55 +1091,9 @@ foreach ($tasks as $task) {
     echo "Task $taskId ($domain): $status - $msg\n";
 }
 
-// --- Reenvío de escrituras DNS que no llegaron a algún nodo (cada ejecución) ---
-// El panel escribe en todos los nodos, pero si uno estaba caído la escritura se
-// perdía sin que nadie se enterase. Ahora queda encolada aquí y se reintenta con
-// backoff hasta que entra. Va fuera del bloque de 5 minutos a propósito: cuanto
-// antes converjan los nodos, mejor.
+// --- Publicación DNS: tareas persistentes por nodo, en orden y sin descartes ---
 try {
-    dnsOutboxEnsureTable($pdo);
-    $pendingOutbox = $pdo->query("SELECT * FROM sys_dns_outbox WHERE next_retry_at <= NOW() ORDER BY id ASC LIMIT 50")->fetchAll();
-
-    if (!empty($pendingOutbox)) {
-        $serversById = [];
-        foreach (getDnsServers() as $s) {
-            $serversById[(int)$s['id']] = $s;
-        }
-
-        foreach ($pendingOutbox as $row) {
-            $srv = $serversById[(int)$row['dns_server_id']] ?? null;
-
-            // Servidor borrado o desactivado: la entrada ya no tiene destino.
-            if (!$srv) {
-                $pdo->prepare("DELETE FROM sys_dns_outbox WHERE id = ?")->execute([$row['id']]);
-                continue;
-            }
-
-            $payload = $row['payload'] === null ? null : json_decode($row['payload'], true);
-            $res = dnsApiRequestOnServer($srv['url'], $row['endpoint'], 'POST', $payload, $srv['token']);
-
-            if ($res['code'] >= 200 && $res['code'] < 300) {
-                $pdo->prepare("DELETE FROM sys_dns_outbox WHERE id = ?")->execute([$row['id']]);
-                echo "Outbox: reenviado {$row['endpoint']} a {$srv['name']}.\n";
-                continue;
-            }
-
-            $attempts = (int)$row['attempts'] + 1;
-
-            if ($attempts >= 10) {
-                // Nos rendimos con esta entrada. No se pierde la detección: el
-                // monitor por hash de más abajo seguirá marcando la zona como
-                // desincronizada hasta que alguien sincronice.
-                $pdo->prepare("DELETE FROM sys_dns_outbox WHERE id = ?")->execute([$row['id']]);
-                echo "Outbox: descartado {$row['endpoint']} para {$srv['name']} tras $attempts intentos (último código {$res['code']}).\n";
-                continue;
-            }
-
-            $backoff = min(3600, 60 * (2 ** min($attempts, 6)));
-            $pdo->prepare("UPDATE sys_dns_outbox SET attempts = ?, last_code = ?, next_retry_at = ? WHERE id = ?")
-                ->execute([$attempts, $res['code'] ?: null, date('Y-m-d H:i:s', time() + $backoff), $row['id']]);
-        }
-    }
+    dnsOutboxProcess($pdo, 50);
 } catch (Exception $e) {
     echo "Outbox: error procesando la cola de reenvío: " . $e->getMessage() . "\n";
 }

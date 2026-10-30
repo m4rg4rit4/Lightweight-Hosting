@@ -29,3 +29,15 @@ La documentación técnica completa, incluyendo arquitectura, gestión de tareas
 
 ---
 Desarrollado con ❤️ para el proyecto [Lightweight](https://github.com/m4rg4rit4/Lightweight).
+
+## Tareas DNS y asignación de zonas
+
+Cada escritura DNS se guarda antes de enviarse, con una tarea por servidor. El motor procesa las tareas en orden y conserva los fallos para reintentarlos. La página **Tareas** muestra el estado por nodo; guardar un cambio confirma su encolado y la publicación se confirma después de la recarga de BIND.
+
+En el detalle de una zona se puede **Asignar a este servidor**, **Cambiar servidor** y **Liberar zona**. Se muestra el propietario y la versión en cada DNS, además de las actualizaciones pendientes. Liberar conserva los registros y el sitio web. Si los nodos discrepan, **Confirmar asignación en ambos DNS** propaga la decisión del principal.
+
+Todos los Hosting deben configurar el mismo primer DNS como autoridad de asignación. Las reclamaciones se comprueban contra la versión mostrada al usuario; una decisión concurrente se marca como conflicto y no se replica ni bloquea los cambios posteriores. Las réplicas llevan una versión para impedir que un reintento antiguo deshaga una transferencia o liberación posterior.
+
+Actualizar primero Go en todos los DNS y después el panel, las utilidades, el motor y los hooks DNS-01. Las tablas se amplían sin descartar las tareas existentes. El cron de `server.php` debe permanecer activo.
+
+Validación local: `php tests/dns_outbox_test.php` y comprobación de sintaxis con `php -l` en los archivos modificados. Las pruebas simulan fallos de nodo, orden de operaciones, reintentos, fan-out de decisiones y conflictos.

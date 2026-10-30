@@ -29,14 +29,6 @@ if (!$domain || !$validation) {
 $servers = getDnsServers();
 if (empty($servers)) exit(1);
 
-// Helper para peticiones: escribe en TODOS los nodos, cada uno con su propio token.
-function dnsApiRequestLocal($endpoint, $method = 'POST', $data = null) {
-    global $servers;
-    foreach ($servers as $s) {
-        dnsApiRequestOnServer($s['url'], $endpoint, $method, $data, $s['token']);
-    }
-}
-
 // 1. Identificar la zona
 // Buscamos cuál de nuestras zonas es sufijo de CERTBOT_DOMAIN
 $res = dnsApiRequestOnServer($servers[0]['url'], '/api-dns/zones', 'GET', null, $servers[0]['token']);
@@ -50,7 +42,7 @@ if (!$foundZone) exit(1);
 $name = ($domain === $foundZone) ? '_acme-challenge' : '_acme-challenge.' . substr($domain, 0, -(strlen($foundZone) + 1));
 
 // 2. Añadir el registro TXT
-dnsApiRequestLocal('/api-dns/record/add', 'POST', [
+$queued = dnsApiRequest('/api-dns/record/add', 'POST', [
     'domain' => $foundZone,
     'name' => $name,
     'type' => 'TXT',
@@ -58,5 +50,18 @@ dnsApiRequestLocal('/api-dns/record/add', 'POST', [
     'ttl' => 60
 ]);
 
-// Esperar un poco para la propagación entre nodos si fuera necesario
-sleep(5);
+// Certbot must wait for publication on every authoritative node, not just
+// acceptance by the API. The normal engine can process the same durable jobs.
+if ($queued['code'] !== 200) exit(1);
+$ids = array_column($queued['nodes'], 'task_id');
+$pdo = getPDO();
+$deadline = time() + 180;
+do {
+    dnsOutboxProcess($pdo, 50);
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM sys_dns_outbox WHERE id IN (" . implode(',', array_fill(0, count($ids), '?')) . ") AND status <> 'completed'");
+    $stmt->execute($ids);
+    if ((int)$stmt->fetchColumn() === 0) { sleep(5); exit(0); }
+    sleep(2);
+} while (time() < $deadline);
+fwrite(STDERR, "DNS: no se confirmó la publicación en todos los nodos. Consulta Tareas.\n");
+exit(1);

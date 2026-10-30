@@ -153,6 +153,46 @@ function getDnsZoneOwners() {
     return $map;
 }
 
+function queueDnsAssignment($domain, $server, $revision) {
+    $servers = getDnsServers();
+    if (!$servers || !is_numeric($revision) || $revision < 0) {
+        return ['code' => 400, 'response' => json_encode(['message' => 'Actualiza la página para obtener la asignación vigente.'])];
+    }
+    // All Hosting nodes must use the same first DNS as assignment authority.
+    return dnsApiRequest('/api-dns/zone/assignment/decide', 'POST', [
+        'domain' => $domain, 'server' => $server, 'expected_revision' => (int)$revision
+    ], [$servers[0]]);
+}
+
+function getDnsAssignmentState($domain) {
+    $nodes = [];
+    foreach (getDnsServers() as $server) {
+        $res = dnsApiRequestOnServer($server['url'], '/api-dns/zone/assignment?domain=' . urlencode($domain), 'GET', null, $server['token']);
+        $data = json_decode($res['response'] ?: '', true);
+        $ok = $res['code'] === 200 && isset($data['revision']) && array_key_exists('server', $data);
+        $nodes[] = ['name' => $server['name'], 'ok' => $ok, 'server' => $ok ? $data['server'] : null, 'revision' => $ok ? $data['revision'] : null];
+    }
+    $pending = 0; $conflict = null; $latestDecisionSeen = false;
+    try {
+        $pdo = getPDO(); dnsOutboxEnsureTable($pdo);
+        $stmt = $pdo->prepare("SELECT endpoint, status, last_error FROM sys_dns_outbox WHERE endpoint LIKE '/api-dns/zone/assignment/%' AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.domain')) = ? ORDER BY id DESC");
+        $stmt->execute([$domain]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $task) {
+            if (!in_array($task['status'], ['completed', 'conflict'], true)) $pending++;
+            if (!$latestDecisionSeen && $task['endpoint'] === '/api-dns/zone/assignment/decide') {
+                $latestDecisionSeen = true;
+                if ($task['status'] === 'conflict') $conflict = $task['last_error'];
+            }
+        }
+    } catch (Exception $e) { error_log('Assignment status: ' . $e->getMessage()); }
+    $primary = $nodes[0] ?? ['ok' => false];
+    $consistent = !empty($nodes) && $primary['ok'];
+    foreach ($nodes as $node) {
+        if (!$node['ok'] || $node['server'] !== ($primary['server'] ?? null) || $node['revision'] !== ($primary['revision'] ?? null)) $consistent = false;
+    }
+    return ['nodes' => $nodes, 'primary' => $primary, 'consistent' => $consistent, 'pending' => $pending, 'conflict' => $conflict];
+}
+
 /**
  * Huella de un registro DNS, para comparar el mismo registro entre nodos.
  *
@@ -293,45 +333,71 @@ function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = n
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
     curl_close($ch);
 
-    return ['code' => $httpCode, 'response' => $response];
+    return ['code' => $httpCode, 'response' => $response, 'error' => $error];
 }
 
 /**
  * Realiza una petición a todos los servidores DNS configurados (para POST/PUT/DELETE)
  * o solo al primero (para GET).
  *
- * Para POST devuelve el resultado del primer nodo (compatibilidad: todo el panel lee
- * ['code']) y añade ['nodes'] con el detalle por servidor. Los nodos que fallan se
- * encolan en sys_dns_outbox para reenviarlos después: antes se descartaba el
- * resultado de todos menos el primero, así que si un secundario daba timeout el panel decía
- * "guardado correctamente" y la divergencia no la detectaba nadie.
+ * Para escrituras, code=200 confirma que las tareas están guardadas para todos
+ * los nodos. Cada tarea se completa solo cuando el nodo confirma la publicación.
  */
-function dnsApiRequest($endpoint, $method = 'GET', $data = null) {
-    $servers = getDnsServers();
+function dnsApiRequest($endpoint, $method = 'GET', $data = null, $destinations = null) {
+    $servers = $destinations ?? getDnsServers();
     if (empty($servers)) return ['code' => 0, 'response' => '', 'nodes' => []];
+
+    if ($method === 'POST' && $endpoint === '/api-dns/add' && empty($data['nameservers'])) {
+        $data['nameservers'] = [];
+        foreach (getDnsServers() as $node) {
+            $host = parse_url($node['url'], PHP_URL_HOST);
+            if (!$host) $host = parse_url('http://' . $node['url'], PHP_URL_HOST);
+            if ($host) $data['nameservers'][] = $host;
+        }
+    }
 
     if ($method === 'GET') {
         return dnsApiRequestOnServer($servers[0]['url'], $endpoint, $method, $data, $servers[0]['token']);
     }
 
-    $mainRes = null;
-    $nodes = [];
-    foreach ($servers as $idx => $s) {
-        $res = dnsApiRequestOnServer($s['url'], $endpoint, $method, $data, $s['token']);
-        $ok = ($res['code'] >= 200 && $res['code'] < 300);
-
-        $nodes[] = ['id' => $s['id'], 'name' => $s['name'], 'url' => $s['url'], 'code' => $res['code'], 'ok' => $ok];
-
-        if (!$ok) {
-            dnsOutboxEnqueue($s['id'], $s['name'], $endpoint, $data, $res['code']);
+    // Persist every destination before sending anything. A crash or timeout
+    // leaves the same durable job key for the next engine run.
+    $pdo = getPDO();
+    $locked = false;
+    try {
+        dnsOutboxEnsureTable($pdo);
+        $locked = (int)$pdo->query("SELECT GET_LOCK('lwh_dns_outbox_enqueue', 10)")->fetchColumn() === 1;
+        if (!$locked) throw new RuntimeException('La cola DNS está ocupada; vuelve a intentarlo.');
+        $pdo->beginTransaction();
+        $ids = [];
+        foreach ($servers as $server) {
+            if ((int)$server['id'] <= 0) throw new RuntimeException('Registra los nodos DNS en el panel para utilizar tareas persistentes.');
+            $key = bin2hex(random_bytes(32));
+            $pdo->prepare("INSERT INTO sys_dns_outbox (dns_server_id, dns_server_name, endpoint, payload, job_key, status, next_retry_at) VALUES (?, ?, ?, ?, ?, 'pending', NOW())")
+                ->execute([$server['id'], $server['name'], $endpoint, $data === null ? null : json_encode($data), $key]);
+            $ids[] = (int)$pdo->lastInsertId();
         }
-        if ($idx === 0) $mainRes = $res;
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        return ['code' => 503, 'response' => json_encode(['message' => 'No se pudo guardar la tarea DNS: ' . $e->getMessage()]), 'nodes' => []];
+    } finally {
+        if ($locked) $pdo->query("SELECT RELEASE_LOCK('lwh_dns_outbox_enqueue')");
     }
-
-    $mainRes['nodes'] = $nodes;
-    return $mainRes;
+    // Keep existing callers compatible. HTTP 200 here means durably accepted;
+    // published state is reported separately and never inferred from acceptance.
+    // The engine performs network I/O. Saving in the panel must not wait on
+    // an unavailable node or an older job's publication.
+    $nodes = [];
+    foreach ($ids as $id) {
+        $stmt = $pdo->prepare("SELECT id AS task_id, dns_server_id AS id, dns_server_name AS name, status, last_error FROM sys_dns_outbox WHERE id = ?");
+        $stmt->execute([$id]);
+        $nodes[] = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+    return ['code' => 200, 'response' => json_encode(['success' => true, 'message' => 'Cambio encolado por servidor DNS']), 'nodes' => $nodes, 'queued' => true];
 }
 
 /**
@@ -349,44 +415,36 @@ function dnsOutboxEnsureTable($pdo) {
         attempts INT NOT NULL DEFAULT 0,
         last_code INT NULL,
         last_error TEXT NULL,
+        job_key CHAR(64) NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        completed_at DATETIME NULL,
         next_retry_at DATETIME NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_retry (next_retry_at)
+        INDEX idx_retry (next_retry_at),
+        INDEX idx_node_pending (dns_server_id, status, id)
     )");
+    // Upgrade the previous retry-only outbox without dropping pending work.
+    $columns = $pdo->query("SHOW COLUMNS FROM sys_dns_outbox")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ([
+        'job_key' => 'CHAR(64) NULL',
+        'status' => "VARCHAR(20) NOT NULL DEFAULT 'pending'",
+        'completed_at' => 'DATETIME NULL'
+    ] as $column => $definition) {
+        if (!in_array($column, $columns, true)) {
+            $pdo->exec("ALTER TABLE sys_dns_outbox ADD COLUMN $column $definition");
+        }
+    }
     $done = true;
 }
 
 /**
- * Encola un POST que un nodo no aceptó, para que el motor lo reintente.
- *
- * Sin id de servidor (rama legacy con ids negativos) no se encola: no habría forma
- * fiable de volver a resolver a qué nodo reenviarlo.
- */
-function dnsOutboxEnqueue($serverId, $serverName, $endpoint, $data, $code) {
-    // PDO puede devolver el id como string según versión, así que se castea. Los ids
-    // de la rama legacy son negativos y quedan descartados por el mismo check.
-    $serverId = (int)$serverId;
-    if ($serverId <= 0) return;
-
-    try {
-        $pdo = getPDO();
-        dnsOutboxEnsureTable($pdo);
-        $pdo->prepare("INSERT INTO sys_dns_outbox (dns_server_id, dns_server_name, endpoint, payload, last_code, next_retry_at)
-                       VALUES (?, ?, ?, ?, ?, NOW())")
-            ->execute([$serverId, $serverName, $endpoint, $data === null ? null : json_encode($data), $code ?: null]);
-    } catch (Exception $e) {
-        // Si ni siquiera se puede encolar, no bloqueamos la acción del usuario:
-        // el monitor periódico seguirá detectando la divergencia por hash.
-    }
-}
-
-/**
- * Número de reenvíos pendientes, para avisar en la cabecera.
+ * Número de publicaciones pendientes, para avisar en la cabecera.
  */
 function dnsOutboxPendingCount() {
     try {
         $pdo = getPDO();
-        return (int)$pdo->query("SELECT COUNT(*) FROM sys_dns_outbox")->fetchColumn();
+        dnsOutboxEnsureTable($pdo);
+        return (int)$pdo->query("SELECT COUNT(*) FROM sys_dns_outbox WHERE status NOT IN ('completed', 'conflict')")->fetchColumn();
     } catch (Exception $e) {
         return 0;
     }
@@ -398,4 +456,86 @@ function dnsOutboxPendingCount() {
 function getDnsServerUrls() {
     $servers = getDnsServers();
     return array_column($servers, 'url');
+}
+
+/** Process only each node's oldest outstanding job, under one DB worker lock.
+ * Strict per-node FIFO is stronger than per-zone FIFO and also orders bulk jobs.
+ * Completed receipts remain available for inspection; failures are never dropped.
+ */
+function dnsOutboxProcess($pdo, $limit = 50, $transport = null, $destinations = null) {
+    dnsOutboxEnsureTable($pdo);
+    if ((int)$pdo->query("SELECT GET_LOCK('lwh_dns_outbox_worker', 0)")->fetchColumn() !== 1) return;
+    try {
+        $servers = [];
+        foreach ($destinations ?? getDnsServers() as $server) $servers[(int)$server['id']] = $server;
+        for ($i = 0; $i < $limit; $i++) {
+            // Wait for any batch being inserted to commit before selecting the
+            // oldest job. Do not hold this lock during network requests.
+            if ((int)$pdo->query("SELECT GET_LOCK('lwh_dns_outbox_enqueue', 10)")->fetchColumn() !== 1) break;
+            try {
+                $row = $pdo->query("SELECT q.* FROM sys_dns_outbox q
+                WHERE q.status NOT IN ('completed', 'conflict') AND q.next_retry_at <= NOW()
+                  AND NOT EXISTS (SELECT 1 FROM sys_dns_outbox older
+                      WHERE older.dns_server_id = q.dns_server_id AND older.id < q.id AND older.status NOT IN ('completed', 'conflict'))
+                ORDER BY q.id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+            } finally {
+                $pdo->query("SELECT RELEASE_LOCK('lwh_dns_outbox_enqueue')");
+            }
+            if (!$row) break;
+            $srv = $servers[(int)$row['dns_server_id']] ?? null;
+            if (!$srv) {
+                $pdo->prepare("UPDATE sys_dns_outbox SET status = 'error', last_error = 'Servidor eliminado o inactivo', next_retry_at = DATE_ADD(NOW(), INTERVAL 1 HOUR) WHERE id = ?")->execute([$row['id']]);
+                continue;
+            }
+            if (empty($row['job_key'])) {
+                $row['job_key'] = bin2hex(random_bytes(32));
+                $pdo->prepare("UPDATE sys_dns_outbox SET job_key = ? WHERE id = ?")->execute([$row['job_key'], $row['id']]);
+            }
+            $payload = $row['payload'] === null ? null : json_decode($row['payload'], true);
+            $send = $transport ?? 'dnsApiRequestOnServer';
+            $res = $send($srv['url'], '/api-dns/jobs?wait=1', 'POST', [
+                'key' => $row['job_key'], 'endpoint' => $row['endpoint'], 'payload' => $payload
+            ], $srv['token']);
+            $body = json_decode($res['response'] ?: '', true);
+            $complete = $res['code'] === 200 && ($body['status'] ?? '') === 'completed';
+            $decision = $row['endpoint'] === '/api-dns/zone/assignment/decide';
+            $assignmentTask = strpos($row['endpoint'], '/api-dns/zone/assignment/') === 0;
+            $conflict = $assignmentTask && in_array($res['code'], [404, 409], true);
+            $waiting = $res['code'] === 202 && ($body['success'] ?? false) && ($body['status'] ?? '') !== 'error';
+            $attempts = (int)$row['attempts'] + 1;
+            $delay = $waiting ? 15 : min(3600, 60 * (2 ** min($attempts, 6)));
+            $error = $complete ? null : ($body['error'] ?? $body['message'] ?? $res['error'] ?? ('HTTP ' . $res['code']));
+            if (!$complete && !$waiting && empty($error)) $error = 'HTTP ' . $res['code'];
+            // Only an accepted decision is replicated. Save its secondary tasks
+            // and completion atomically: recovery reuses the primary's receipt.
+            if ($decision && $complete) {
+                $accepted = $body['result'] ?? null;
+                if (!is_array($accepted) || !isset($accepted['revision'], $accepted['domain'], $accepted['server'])) {
+                    throw new RuntimeException('El DNS principal no devolvió una decisión de asignación válida.');
+                }
+                $pdo->beginTransaction();
+                try {
+                    foreach ($servers as $target) {
+                        if ((int)$target['id'] === (int)$row['dns_server_id']) continue;
+                        $replica = ['domain' => $accepted['domain'], 'server' => $accepted['server'], 'revision' => $accepted['revision']];
+                        $key = hash('sha256', $row['job_key'] . ':assignment:' . $target['id']);
+                        $pdo->prepare("INSERT INTO sys_dns_outbox (dns_server_id, dns_server_name, endpoint, payload, job_key, status, next_retry_at) VALUES (?, ?, ?, ?, ?, 'pending', NOW())")
+                            ->execute([$target['id'], $target['name'], '/api-dns/zone/assignment/apply', json_encode($replica), $key]);
+                    }
+                    $pdo->prepare("UPDATE sys_dns_outbox SET status = 'completed', attempts = ?, last_code = ?, last_error = NULL, completed_at = NOW() WHERE id = ?")
+                        ->execute([$attempts, $res['code'], $row['id']]);
+                    $pdo->commit();
+                } catch (Throwable $e) {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    throw $e;
+                }
+                continue;
+            }
+            $pdo->prepare("UPDATE sys_dns_outbox SET status = ?, attempts = ?, last_code = ?, last_error = ?, next_retry_at = ?, completed_at = ? WHERE id = ?")
+                ->execute([$conflict ? 'conflict' : ($complete ? 'completed' : ($waiting ? 'publishing' : 'error')), $attempts, $res['code'], $error,
+                    date('Y-m-d H:i:s', time() + $delay), $complete ? date('Y-m-d H:i:s') : null, $row['id']]);
+        }
+    } finally {
+        $pdo->query("SELECT RELEASE_LOCK('lwh_dns_outbox_worker')");
+    }
 }

@@ -39,7 +39,7 @@ checkAuth();
             DNS
             <span style="width: 8px; height: 8px; border-radius: 50%; background: <?php echo $healthColor; ?>;" title="<?php echo htmlspecialchars($dnsHealth['message']); ?>"></span>
             <?php if ($outboxPending > 0): ?>
-                <span style="background: var(--warning); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 8px;" title="<?php echo $outboxPending; ?> escritura(s) DNS pendientes de reenviar a algún nodo. El motor las reintenta automáticamente.">↻ <?php echo $outboxPending; ?></span>
+                <span style="background: var(--warning); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 8px;" title="<?php echo $outboxPending; ?> publicación(es) DNS pendientes. Consulta el estado por servidor en Tareas.">↻ <?php echo $outboxPending; ?></span>
             <?php endif; ?>
         </a>
     <?php endif; ?>

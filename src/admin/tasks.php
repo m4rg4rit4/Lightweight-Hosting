@@ -2,6 +2,14 @@
 session_start();
 require 'config.php';
 $pdo = getPDO();
+require_once 'dns_utils.php';
+$dnsTasks = [];
+try {
+    dnsOutboxEnsureTable($pdo);
+    $dnsTasks = $pdo->query("SELECT id, dns_server_name, endpoint, payload, status, attempts, last_error, next_retry_at, completed_at FROM sys_dns_outbox ORDER BY (status = 'completed'), id DESC LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    error_log('DNS task list: ' . $e->getMessage());
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
@@ -174,6 +182,30 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50"
                 <div style="font-size: 0.85rem; color: var(--text-dim);">Últimas 50 tareas</div>
             </div>
         </div>
+
+        <h2>Publicaciones DNS por servidor</h2>
+        <p>Las tareas se ejecutan en orden en cada servidor. Un error queda pendiente de reintento y no bloquea los demás nodos.</p>
+        <table>
+            <thead><tr><th>ID</th><th>Servidor</th><th>Zona / Operación</th><th>Estado</th><th>Intentos</th><th>Último error</th><th>Próximo intento / Publicación</th></tr></thead>
+            <tbody>
+            <?php foreach ($dnsTasks as $dnsTask):
+                $dnsPayload = json_decode($dnsTask['payload'] ?? '', true);
+                $dnsLabels = ['pending' => 'Pendiente', 'publishing' => 'Publicando', 'error' => 'Error; se reintentará', 'completed' => 'Completado', 'conflict' => 'Conflicto; actualiza la zona'];
+            ?>
+                <tr>
+                    <td>#<?php echo (int)$dnsTask['id']; ?></td>
+                    <td><?php echo htmlspecialchars($dnsTask['dns_server_name']); ?></td>
+                    <td><?php echo htmlspecialchars(($dnsPayload['domain'] ?? 'Varias zonas') . ' · ' . $dnsTask['endpoint']); ?></td>
+                    <td><?php echo htmlspecialchars($dnsLabels[$dnsTask['status']] ?? $dnsTask['status']); ?></td>
+                    <td><?php echo (int)$dnsTask['attempts']; ?></td>
+                    <td><?php echo htmlspecialchars($dnsTask['last_error'] ?? ''); ?></td>
+                    <td><?php echo htmlspecialchars($dnsTask['completed_at'] ?? $dnsTask['next_retry_at']); ?></td>
+                </tr>
+            <?php endforeach; ?>
+            <?php if (!$dnsTasks): ?><tr><td colspan="7">No hay tareas DNS registradas.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+        <h2>Tareas del sistema</h2>
 
         <table>
             <thead>
