@@ -65,7 +65,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add_zone' || $action === 'add_local_zone') {
         $newZone = strtolower(trim($_POST['new_domain']));
-        $targetIp = trim($_POST['target_ip']);
+        $targetIp = trim($_POST['target_ip'] ?? '');
+        try {
+            $targetIp = isset($_POST['dns_only']) ? '' : getHostingDnsTargetIp($targetIp);
+        } catch (Exception $e) {
+            $_SESSION['flash_msg'] = $e->getMessage();
+            $_SESSION['flash_type'] = 'error';
+            header('Location: dns.php');
+            exit;
+        }
 
         // La zona nace asignada a este servidor, salvo que sea hija de una zona ya
         // existente: en ese caso hereda el dueño del padre, para que el árbol de
@@ -209,7 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    elseif ($action === 'add_record') {
+    elseif ($action === 'add_record' && !isset($_POST['save_soa'])) {
         $name = trim($_POST['name']);
         $type = trim($_POST['type']);
         $content = trim($_POST['content']);
@@ -1134,7 +1142,8 @@ if ($activeDomain && isset($_GET['export'])) {
                 </div>
                 <div class="form-group" style="margin-bottom: 24px;">
                     <label>IP de Destino (Opcional)</label>
-                    <input type="text" name="target_ip" placeholder="Se usará la IP de este servidor por defecto" style="padding: 12px;">
+                    <input type="text" name="target_ip" placeholder="Se usará la IP pública de este servidor por defecto" style="padding: 12px;">
+                    <label style="display:block; margin-top:10px;"><input type="checkbox" name="dns_only" value="1"> Solo zona DNS: no crear dirección web ni www</label>
                 </div>
                 <div style="display: flex; gap: 12px; justify-content: flex-end;">
                     <button type="button" onclick="document.getElementById('modal-add').style.display='none'" class="btn btn-outline" style="min-width: 100px;">Cancelar</button>

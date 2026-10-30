@@ -41,3 +41,5 @@ Todos los Hosting deben configurar el mismo primer DNS como autoridad de asignac
 Actualizar primero Go en todos los DNS y después el panel, las utilidades, el motor y los hooks DNS-01. Las tablas se amplían sin descartar las tareas existentes. El cron de `server.php` debe permanecer activo.
 
 Validación local: `php tests/dns_outbox_test.php` y comprobación de sintaxis con `php -l` en los archivos modificados. Las pruebas simulan fallos de nodo, orden de operaciones, reintentos, fan-out de decisiones y conflictos.
+
+En la versión 1.4.42, dejar vacía la IP al crear una zona usa la IP pública del Hosting. La opción **Solo zona DNS** omite A/AAAA y `www` de forma explícita. El editor SOA permite crear la fila si falta, además de editarla cuando existe. La creación de un sitio web y la creación de su zona DNS siguen siendo operaciones distintas; la delegación en el registrador debe apuntar a los NS configurados.

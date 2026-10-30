@@ -6,6 +6,12 @@ function check($condition, $message) {
 }
 function getPDO() { return $GLOBALS['db']; }
 
+check(getHostingDnsTargetIp('192.0.2.20', []) === '192.0.2.20', 'Explicit IPv4 must be retained');
+check(getHostingDnsTargetIp('2001:db8::20', []) === '2001:db8::20', 'Explicit IPv6 must be retained');
+check(getHostingDnsTargetIp('', ['127.0.0.1','10.0.0.1','8.8.8.8']) === '8.8.8.8', 'Automatic target must skip private/loopback addresses');
+try { getHostingDnsTargetIp('not-an-IP', []); throw new LogicException('Invalid IP accepted'); } catch (InvalidArgumentException $expected) {}
+try { getHostingDnsTargetIp('', []); throw new LogicException('Missing IP silently accepted'); } catch (RuntimeException $expected) {}
+
 // Small database double: exercise the real worker and SQL ordering rules without
 // touching a production database or contacting real DNS servers.
 class QueueResult {

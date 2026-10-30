@@ -241,6 +241,31 @@ function hasDnsServers() {
     return !empty(getDnsServers());
 }
 
+function getHostingDnsTargetIp($provided = '', $candidates = null) {
+    $provided = trim($provided);
+    if ($provided !== '') {
+        if (!filter_var($provided, FILTER_VALIDATE_IP)) throw new InvalidArgumentException('La dirección IP indicada no es válida.');
+        return $provided;
+    }
+    $automatic = $candidates === null;
+    if ($automatic) {
+        $configured = defined('HOSTING_PUBLIC_IP') ? HOSTING_PUBLIC_IP : getenv('HOSTING_PUBLIC_IP');
+        $candidates = [$configured ?: '', $_SERVER['SERVER_ADDR'] ?? ''];
+        $resolved = gethostbynamel(gethostname());
+        if ($resolved) $candidates = array_merge($candidates, $resolved);
+    }
+    foreach ($candidates as $candidate) {
+        if (filter_var($candidate, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return $candidate;
+    }
+    if ($automatic) {
+        $curl = curl_init('https://api.ipify.org');
+        curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 2, CURLOPT_TIMEOUT => 4]);
+        $candidate = trim(curl_exec($curl) ?: ''); curl_close($curl);
+        if (filter_var($candidate, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return $candidate;
+    }
+    throw new RuntimeException('No se pudo detectar la IP pública del Hosting. Indícala o selecciona crear solo la zona DNS.');
+}
+
 /**
  * Verifica salud del cluster DNS.
  *
