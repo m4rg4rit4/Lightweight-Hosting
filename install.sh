@@ -17,6 +17,7 @@ AUTO_UPDATE=false
 FORCE_SILENT=false
 ADMIN_PATH="/var/www/admin_panel"
 ENGINE_PATH="/usr/local/bin/hosting"
+REPO_RAW=${LWH_HOSTING_REPO_RAW:-https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main}
 
 # Serialize nightly/manual installs with the root task worker. The worker already
 # owns this lock when invoking an update itself.
@@ -75,7 +76,7 @@ ask_input() {
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION=$(curl -fsSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/VERSION 2>/dev/null | tr -d '[:space:]')
+    VERSION=$(curl -fsSL "$REPO_RAW/VERSION" 2>/dev/null | tr -d '[:space:]')
     VERSION=${VERSION:-"1.4.20"}
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
@@ -460,8 +461,7 @@ DEFAULT_PASS=${EXISTING_ADMIN_PASS:-$(openssl rand -base64 12)}
 ask_input "Introduce la CONTRASEÑA de administración [$DEFAULT_PASS]: " "$DEFAULT_PASS" "ADMIN_PASS"
 ADMIN_PASS=$(sanitize_var "$ADMIN_PASS")
 
-# Definir URL base para archivos raw
-REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
+# REPO_RAW is selected above; tests can pin a complete immutable GitHub release.
 
 # Descargar archivos a /tmp primero
 curl -fsSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php" || exit 1

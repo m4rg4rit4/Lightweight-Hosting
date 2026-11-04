@@ -1,7 +1,7 @@
 #!/bin/bash
 # Autoupdate script for Lightweight-Hosting
 
-REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
+REPO_RAW=${LWH_HOSTING_REPO_RAW:-https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main}
 VERSION_LOCK="/var/www/admin_panel/config.php"
 
 # Colores
@@ -24,13 +24,17 @@ if [ -z "$REMOTE_VERSION" ]; then
     echo -e "${RED}Error: No se pudo obtener la versión remota.${NC}"
     exit 1
 fi
+if ! [[ "$REMOTE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || ! [[ "$LOCAL_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo 'Error: formato de versión no válido.' >&2
+    exit 1
+fi
 
 echo -e "${YELLOW}Comprobando actualizaciones de Lightweight-Hosting...${NC}"
 echo -e "Versión local:  ${GREEN}$LOCAL_VERSION${NC}"
 echo -e "Versión remota: ${GREEN}$REMOTE_VERSION${NC}"
 
-# Comparar versiones (si son diferentes, actualizar)
-if [ "$LOCAL_VERSION" != "$REMOTE_VERSION" ]; then
+# A stale mirror/cache must never downgrade an already installed release.
+if dpkg --compare-versions "$REMOTE_VERSION" gt "$LOCAL_VERSION"; then
     echo -e "${YELLOW}¡Nueva versión detectada! Iniciando actualización...${NC}"
     
     TEMP_INSTALL=$(mktemp /tmp/lwh-update-XXXXXXXX) || exit 1
