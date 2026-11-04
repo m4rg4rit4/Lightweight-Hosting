@@ -497,6 +497,7 @@ fi
 
 # Mover archivos a su destino final
 for staged_php in "$TEMP_DIR"/*.php; do php -l "$staged_php" >/dev/null || exit 1; done
+for staged_shell in "$TEMP_DIR"/*.sh; do bash -n "$staged_shell" || exit 1; done
 # A small fixups hook blocks distributed proxy rules from reaching another
 # site's FPM pool. It preserves live .htaccess and has no extra daemon.
 apt install -y apache2-dev >/dev/null || exit 1
@@ -523,12 +524,15 @@ cp "$TEMP_DIR/certbot_dns_auth.php" "$ENGINE_PATH/certbot_dns_auth.php"
 cp "$TEMP_DIR/certbot_dns_cleanup.php" "$ENGINE_PATH/certbot_dns_cleanup.php"
 chmod +x "$ENGINE_PATH/certbot_dns_auth.php" "$ENGINE_PATH/certbot_dns_cleanup.php"
 cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
-cp "$TEMP_DIR/sync_monitor.sh" "$ENGINE_PATH/sync_monitor.sh"
+install -m 0700 "$TEMP_DIR/sync_monitor.sh" "$ENGINE_PATH/sync_monitor.sh.new" || exit 1
+mv -f -- "$ENGINE_PATH/sync_monitor.sh.new" "$ENGINE_PATH/sync_monitor.sh" || exit 1
 cp "$TEMP_DIR/auto_backup.php" "$ENGINE_PATH/auto_backup.php"
-cp "$TEMP_DIR/autoupdate.sh" "$ENGINE_PATH/autoupdate.sh"
-chmod +x "$ENGINE_PATH/autoupdate.sh"
-cp "$TEMP_DIR/installadmin.sh" "./installadmin.sh"
-chmod +x ./installadmin.sh
+# Rename a new inode: overwriting a running shell script can make bash read
+# part of the new version and fail with an unexpected EOF after the update.
+install -m 0700 "$TEMP_DIR/autoupdate.sh" "$ENGINE_PATH/autoupdate.sh.new" || exit 1
+mv -f -- "$ENGINE_PATH/autoupdate.sh.new" "$ENGINE_PATH/autoupdate.sh" || exit 1
+install -m 0700 "$TEMP_DIR/installadmin.sh" "./installadmin.sh.new" || exit 1
+mv -f -- "./installadmin.sh.new" "./installadmin.sh" || exit 1
 
 # Limpiar directorio temporal
 rm -rf "$TEMP_DIR"
