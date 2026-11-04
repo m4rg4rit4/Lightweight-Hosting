@@ -1,7 +1,7 @@
 <?php
 $source = file_get_contents(__DIR__ . '/../src/engine/server.php');
 $start = strpos($source, 'function siteApplicationRoot(');
-$end = strpos($source, 'function normalizeHtaccessOptions(', $start);
+$end = strpos($source, 'function prepareSharedSite(', $start);
 eval(substr($source, $start, $end - $start));
 foreach ([
     ['/var/www/html', '/var/www/html'],
