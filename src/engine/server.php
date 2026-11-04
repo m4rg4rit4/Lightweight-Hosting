@@ -65,6 +65,10 @@ function privateWorkdir() {
     if (!mkdir($path, 0700)) throw new RuntimeException('No se pudo crear el directorio temporal.');
     return $path;
 }
+function copyApplicationTree($source, $destination) {
+    checkedCommand('cp -a -- ' . escapeshellarg(rtrim($source, '/') . '/.') . ' ' . escapeshellarg($destination));
+    checkedCommand('python3 ' . escapeshellarg(__DIR__ . '/archive_links.py') . ' ' . escapeshellarg($source) . ' ' . escapeshellarg($destination));
+}
 function checkedCommand($command) {
     $output = []; $code = 0;
     exec($command . ' 2>&1', $output, $code);
@@ -125,6 +129,27 @@ function getMissingCertNames($domain, $publicIP) {
 }
 
 function siteUser($domain) { return 'lwh_' . substr(hash('sha256', $domain), 0, 16); }
+function fpmPoolLimit($phpVersion) {
+    $configuration = @file_get_contents("/etc/php/$phpVersion/fpm/php-fpm.conf");
+    if ($configuration && preg_match('/^\s*process\.max\s*=\s*(\d+)/m', $configuration, $match)) return min(10, max(2, intdiv((int)$match[1], 2)));
+    return 2;
+}
+function siteApplicationRoot($domain, $documentRoot) {
+    if (strlen($domain) > 253 || !preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/D', $domain)) throw new RuntimeException('Dominio inválido.');
+    $documentRoot = rtrim($documentRoot, '/');
+    $container = $documentRoot === '/var/www/html' ? $documentRoot : '/var/www/vhosts/' . $domain;
+    if ($documentRoot !== $container && strpos($documentRoot, $container . '/') !== 0) throw new RuntimeException('Raíz del sitio fuera de su contenedor.');
+    foreach (explode('/', substr($documentRoot, 1)) as $part) {
+        if ($part === '.' || $part === '..' || !preg_match('/^[a-zA-Z0-9._-]+$/D', $part)) throw new RuntimeException('Ruta de sitio inválida.');
+    }
+    // Check all existing ancestors, including a parent of a missing public dir.
+    $current = '';
+    foreach (explode('/', substr($documentRoot, 1)) as $part) {
+        $current .= '/' . $part;
+        if (is_link($current)) throw new RuntimeException('La raíz del sitio contiene un enlace.');
+    }
+    return $container;
+}
 function normalizeHtaccessOptions($contents) {
     return preg_replace_callback('/^([ \t]*Options[ \t]+)([^\r\n]*)/mi', function ($match) {
         $tokens = preg_split('/([ \t]+)/', $match[2], -1, PREG_SPLIT_DELIM_CAPTURE);
@@ -154,21 +179,20 @@ function migrateHtaccessOptions($path, $user) {
 }
 function isolateSite($domain, $path, $phpVersion) {
     global $isolationBatch;
-    if (strlen($domain) > 253 || !preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/D', $domain)) throw new RuntimeException('Dominio inválido.');
-    if ($path !== '/var/www/html' && $path !== '/var/www/vhosts/' . $domain) throw new RuntimeException('Raíz del sitio fuera de la ubicación permitida.');
+    $applicationRoot = siteApplicationRoot($domain, $path);
     $user = siteUser($domain);
     umask(0007);
     if (!posix_getpwnam($user)) checkedCommand('/usr/sbin/useradd --system --user-group --no-create-home --shell /usr/sbin/nologin ' . escapeshellarg($user));
     // Panel and Apache can access sites; site users cannot access each other or the panel.
     checkedCommand('/usr/sbin/usermod -a -G ' . escapeshellarg($user) . ' www-data');
-    if (is_link($path)) throw new RuntimeException('La raíz del sitio no puede ser un enlace.');
-    if (is_dir($path)) {
-        migrateHtaccessOptions($path, $user);
-        checkedCommand('chown -R -h -- ' . escapeshellarg($user . ':' . $user) . ' ' . escapeshellarg($path));
-        checkedCommand('find ' . escapeshellarg($path) . ' -type d -exec chmod 2770 {} +');
-        checkedCommand('find ' . escapeshellarg($path) . ' -type f -exec chmod 0660 {} +');
+    if (is_dir($applicationRoot)) {
+        migrateHtaccessOptions($applicationRoot, $user);
+        checkedCommand('chown -R -h -- ' . escapeshellarg($user . ':' . $user) . ' ' . escapeshellarg($applicationRoot));
+        checkedCommand('find ' . escapeshellarg($applicationRoot) . ' -type d -exec chmod 2770 {} +');
+        checkedCommand('find ' . escapeshellarg($applicationRoot) . ' -type f -exec chmod u+rw,g+rw,o-rwx {} +');
     }
-    $pool = "[$user]\nuser = $user\ngroup = $user\nlisten = /run/php/$user.sock\nlisten.owner = www-data\nlisten.group = www-data\nlisten.mode = 0600\npm = ondemand\npm.max_children = 2\npm.process_idle_timeout = 10s\npm.max_requests = 300\nphp_admin_value[memory_limit] = 128M\nphp_admin_value[session.save_path] = /var/lib/php/$user\n";
+    $poolLimit = fpmPoolLimit($phpVersion);
+    $pool = "[$user]\nuser = $user\ngroup = $user\nlisten = /run/php/$user.sock\nlisten.owner = www-data\nlisten.group = www-data\nlisten.mode = 0600\npm = ondemand\npm.max_children = $poolLimit\npm.process_idle_timeout = 10s\npm.max_requests = 300\nphp_admin_value[memory_limit] = 128M\nphp_admin_value[session.save_path] = /var/lib/php/$user\n";
     if (!is_dir('/var/lib/php/' . $user)) mkdir('/var/lib/php/' . $user, 0700, true);
     chown('/var/lib/php/' . $user, $user);
     file_put_contents("/etc/php/$phpVersion/fpm/pool.d/$user.conf", $pool);
@@ -182,10 +206,11 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     global $php_socket, $pdo;
     $siteSocket = "/run/php/" . siteUser($domain) . ".sock";
     $identity = siteUser($domain);
-    clearstatcache(true, $document_root);
+    $applicationRoot = siteApplicationRoot($domain, $document_root);
+    clearstatcache(true, $applicationRoot);
     $account = posix_getpwnam($identity);
     if (!file_exists("/etc/php/$php_v/fpm/pool.d/$identity.conf") || !$account ||
-        (is_dir($document_root) && fileowner($document_root) !== $account['uid'])) {
+        (is_dir($applicationRoot) && fileowner($applicationRoot) !== $account['uid'])) {
         isolateSite($domain, $document_root, $php_v);
     }
     $port = $is_ssl ? 443 : 80;
@@ -360,8 +385,16 @@ try {
 
 // Migrate existing sites once. Keep the marker absent until every site succeeds.
 if (!$pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'migration_site_isolation_v1'")->fetchColumn()) {
+    $migrationSites = $pdo->query('SELECT domain, document_root FROM sys_sites')->fetchAll();
+    // Validate the whole inventory before changing any site's ownership.
+    $containers = [];
+    foreach ($migrationSites as $existingSite) {
+        $container = siteApplicationRoot($existingSite['domain'], $existingSite['document_root']);
+        if (isset($containers[$container])) throw new RuntimeException('Dos sitios comparten un contenedor; revisar antes de migrar.');
+        $containers[$container] = true;
+    }
     $isolationBatch = true;
-    foreach ($pdo->query('SELECT domain, document_root FROM sys_sites')->fetchAll() as $existingSite) {
+    foreach ($migrationSites as $existingSite) {
         isolateSite($existingSite['domain'], $existingSite['document_root'], $php_v);
         $pdo->prepare("INSERT INTO sys_tasks (task_type, payload) VALUES ('SITE_UPDATE_PHP_SETTINGS', ?)")->execute([json_encode(['domain' => $existingSite['domain']])]);
     }
@@ -949,6 +982,7 @@ foreach ($tasks as $task) {
             
             $domain = $siteData['domain'];
             $docRoot = $siteData['document_root'];
+            $applicationRoot = siteApplicationRoot($domain, $docRoot);
             
             // Obtener TODAS las bases de datos asociadas al sitio
             $stmtDbs = $pdo->prepare("SELECT db_name, db_user, db_pass FROM sys_databases WHERE site_id = ?");
@@ -963,6 +997,8 @@ foreach ($tasks as $task) {
             $config = [
                 'domain' => $domain,
                 'document_root' => $docRoot,
+                'application_root' => $applicationRoot,
+                'backup_format' => 2,
                 'timestamp' => $timestamp,
                 'databases' => [] // Nuevo array para múltiples DBs
             ];
@@ -993,7 +1029,7 @@ foreach ($tasks as $task) {
             file_put_contents("$tmpDir/config.json", json_encode($config, JSON_PRETTY_PRINT));
             
             // Preserve links without reading arbitrary targets as root.
-            checkedCommand('cp -a -- ' . escapeshellarg(rtrim($docRoot, '/') . '/.') . ' ' . escapeshellarg($tmpDir . '/webroot'));
+            copyApplicationTree($applicationRoot, $tmpDir . '/webroot');
             
             $itemsToTar = "config.json webroot";
             if (!empty($dbFiles)) {
@@ -1076,6 +1112,13 @@ foreach ($tasks as $task) {
             
             checkedCommand('python3 -c ' . escapeshellarg('import sys,tarfile; t=tarfile.open(sys.argv[1]); t.extractall(sys.argv[2], filter="data")') . ' ' . escapeshellarg($tmpTar) . ' ' . escapeshellarg($tmpDir));
             
+            $metadata = is_file("$tmpDir/config.json") ? json_decode(file_get_contents("$tmpDir/config.json"), true) : [];
+            $format = (int)($metadata['backup_format'] ?? 1);
+            if (!in_array($format, [1, 2], true)) throw new RuntimeException('Formato de copia no compatible.');
+            $applicationRoot = siteApplicationRoot($domain, $siteData['document_root']);
+            $restoreRoot = $format === 2 ? $applicationRoot : $siteData['document_root'];
+            $docRoot = escapeshellarg($restoreRoot);
+
             $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
             $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
             
@@ -1137,8 +1180,7 @@ foreach ($tasks as $task) {
             
             if (is_dir("$tmpDir/webroot")) {
                 // Remove existing files and copy new ones
-                if ($siteData['document_root'] !== '/var/www/html' && $siteData['document_root'] !== '/var/www/vhosts/' . $domain) throw new RuntimeException('Raíz no permitida.');
-                if (is_link($siteData['document_root'])) throw new RuntimeException('La raíz no puede ser un enlace.');
+                if (is_link($restoreRoot)) throw new RuntimeException('La raíz no puede ser un enlace.');
                 checkedCommand("find $docRoot -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +");
                 checkedCommand("cp -a " . escapeshellarg("$tmpDir/webroot/.") . " $docRoot/");
                 isolateSite($domain, $siteData['document_root'], $php_v);
@@ -1167,6 +1209,7 @@ foreach ($tasks as $task) {
             
             $domain = $siteData['domain'];
             $docRoot = $siteData['document_root'];
+            $applicationRoot = siteApplicationRoot($domain, $docRoot);
             
             // 1. Crear directorio de descargas de forma segura si no existe
             $downloadsDir = "/var/lib/lightweight-hosting/exports";
@@ -1211,7 +1254,7 @@ foreach ($tasks as $task) {
             }
             
             // Preserve links without reading arbitrary targets as root.
-            checkedCommand('cp -a -- ' . escapeshellarg(rtrim($docRoot, '/') . '/.') . ' ' . escapeshellarg($tmpDir . '/webroot'));
+            copyApplicationTree($applicationRoot, $tmpDir . '/webroot');
             
             $itemsToTar = "webroot";
             if (!empty($dbFiles)) {

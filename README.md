@@ -30,7 +30,15 @@ incluido utilizando `apache2-dev`, sin añadir otro servicio en ejecución.
 La referencia de compatibilidad es el vhost y el valor `allow_override` de
 [ISPConfig 3.3.2p1](https://www.ispconfig.org/ispconfig/download/).
 Los pools arrancan bajo demanda, con dos procesos por pool y un máximo global de
-cuatro procesos FPM para el perfil de 1 GB; ajustar tras medir la carga real.
+cuatro procesos FPM para el perfil de 1 GB. En servidores con más memoria, el
+instalador calcula un límite global mayor y permite hasta diez procesos por pool.
+
+Se admiten raíces públicas anidadas dentro del contenedor propio, por ejemplo
+`/var/www/vhosts/example.com/public`. El aislamiento, las exportaciones y los
+backups abarcan toda la aplicación, incluidos `storage`, `vendor` y su
+configuración, conservando enlaces internos. Los backups nuevos incluyen formato
+de archivo; las copias antiguas mantienen su restauración sobre la raíz pública.
+Se validan todas las rutas antes de comenzar la migración de propietarios.
 
 El update nocturno y los backups mantienen las 03:00 en la zona horaria del
 servidor. El instalador y el motor comparten un bloqueo para evitar solaparse.

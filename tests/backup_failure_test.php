@@ -17,6 +17,8 @@ function checkedCommand($cmd) {
     global $scenario;
     if ($scenario === 'archive_failure') throw new \RuntimeException('simulated archive failure');
 }
+function siteApplicationRoot($domain, $path) { return $path; }
+function copyApplicationTree($source, $destination) { checkedCommand('copy application'); }
 function privateWorkdir() {
     global $workdirs;
     $temporary = __DIR__ . '/../temp';
