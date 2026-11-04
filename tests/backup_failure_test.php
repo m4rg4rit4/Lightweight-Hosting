@@ -67,6 +67,7 @@ foreach (['upload_failure', 'archive_failure', 'retention_delete_failure'] as $s
         }
     }
     if ($deletes !== 0) throw new \RuntimeException('Failed remote deletion lost backup metadata');
+    if (basename($tmpTar) !== $backupFile || dirname($tmpTar) !== $tmpDir) throw new \RuntimeException('Backup transport name or private directory differs from metadata');
     if ($scenario !== 'retention_delete_failure' && $retentionQueries !== 0) throw new \RuntimeException('Failed backup triggered retention');
     if ($scenario === 'archive_failure' && $uploads !== 0) throw new \RuntimeException('Broken archive was uploaded');
 }

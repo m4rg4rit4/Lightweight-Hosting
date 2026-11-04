@@ -128,12 +128,6 @@ function getMissingCertNames($domain, $publicIP) {
     return $missing;
 }
 
-function siteUser($domain) { return 'lwh_' . substr(hash('sha256', $domain), 0, 16); }
-function fpmPoolLimit($phpVersion) {
-    $configuration = @file_get_contents("/etc/php/$phpVersion/fpm/php-fpm.conf");
-    if ($configuration && preg_match('/^\s*process\.max\s*=\s*(\d+)/m', $configuration, $match)) return min(10, max(2, intdiv((int)$match[1], 2)));
-    return 2;
-}
 function siteApplicationRoot($domain, $documentRoot) {
     if (strlen($domain) > 253 || !preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/D', $domain)) throw new RuntimeException('Dominio inválido.');
     $documentRoot = rtrim($documentRoot, '/');
@@ -150,77 +144,20 @@ function siteApplicationRoot($domain, $documentRoot) {
     }
     return $container;
 }
-function normalizeHtaccessOptions($contents) {
-    return preg_replace_callback('/^([ \t]*Options[ \t]+)([^\r\n]*)/mi', function ($match) {
-        $tokens = preg_split('/([ \t]+)/', $match[2], -1, PREG_SPLIT_DELIM_CAPTURE);
-        foreach ($tokens as &$token) {
-            if (strcasecmp($token, '+FollowSymLinks') === 0) $token = '+SymLinksIfOwnerMatch';
-            elseif (strcasecmp($token, 'FollowSymLinks') === 0) $token = 'SymLinksIfOwnerMatch';
-        }
-        return $match[1] . implode('', $tokens);
-    }, $contents);
-}
-function migrateHtaccessOptions($path, $user) {
-    $backupDir = '/var/lib/lightweight-hosting/htaccess-migration/' . $user;
-    $entries = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS));
-    foreach ($entries as $entry) {
-        if ($entry->getFilename() !== '.htaccess' || $entry->isLink() || !$entry->isFile()) continue;
-        $file = $entry->getPathname();
-        $contents = file_get_contents($file);
-        if ($contents === false) throw new RuntimeException('No se pudo leer .htaccess.');
-        $updated = normalizeHtaccessOptions($contents);
-        if ($updated === $contents) continue;
-        if (!is_dir($backupDir) && !mkdir($backupDir, 0700, true)) throw new RuntimeException('No se pudo guardar la configuración anterior.');
-        $backup = $backupDir . '/' . hash('sha256', $file) . '.htaccess';
-        if (!file_exists($backup) && !copy($file, $backup)) throw new RuntimeException('No se pudo guardar .htaccess.');
-        chmod($backup, 0600);
-        if (file_put_contents($file, $updated) === false) throw new RuntimeException('No se pudo adaptar .htaccess.');
-    }
-}
-function isolateSite($domain, $path, $phpVersion) {
-    global $isolationBatch;
+function prepareSharedSite($domain, $path) {
     $applicationRoot = siteApplicationRoot($domain, $path);
-    $user = siteUser($domain);
-    umask(0007);
-    if (!posix_getpwnam($user)) checkedCommand('/usr/sbin/useradd --system --user-group --no-create-home --shell /usr/sbin/nologin ' . escapeshellarg($user));
-    // Panel and Apache can access sites; site users cannot access each other or the panel.
-    checkedCommand('/usr/sbin/usermod -a -G ' . escapeshellarg($user) . ' www-data');
     if (is_dir($applicationRoot)) {
-        migrateHtaccessOptions($applicationRoot, $user);
-        checkedCommand('chown -R -h -- ' . escapeshellarg($user . ':' . $user) . ' ' . escapeshellarg($applicationRoot));
-        checkedCommand('find ' . escapeshellarg($applicationRoot) . ' -type d -exec chmod 2770 {} +');
-        checkedCommand('find ' . escapeshellarg($applicationRoot) . ' -type f -exec chmod u+rw,g+rw,o-rwx {} +');
-    }
-    $poolLimit = fpmPoolLimit($phpVersion);
-    $pool = "[$user]\nuser = $user\ngroup = $user\nlisten = /run/php/$user.sock\nlisten.owner = www-data\nlisten.group = www-data\nlisten.mode = 0600\npm = ondemand\npm.max_children = $poolLimit\npm.process_idle_timeout = 10s\npm.max_requests = 300\nphp_admin_value[memory_limit] = 128M\nphp_admin_value[session.save_path] = /var/lib/php/$user\n";
-    if (!is_dir('/var/lib/php/' . $user)) mkdir('/var/lib/php/' . $user, 0700, true);
-    chown('/var/lib/php/' . $user, $user);
-    file_put_contents("/etc/php/$phpVersion/fpm/pool.d/$user.conf", $pool);
-    checkedCommand('/usr/sbin/php-fpm' . $phpVersion . ' -t');
-    if (empty($isolationBatch)) {
-        checkedCommand('/usr/bin/systemctl restart php' . $phpVersion . '-fpm');
-        checkedCommand('/usr/bin/systemctl restart apache2');
+        checkedCommand('chown -R -h -- www-data:www-data ' . escapeshellarg($applicationRoot));
     }
 }
 function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = false) {
     global $php_socket, $pdo;
-    $siteSocket = "/run/php/" . siteUser($domain) . ".sock";
-    $identity = siteUser($domain);
-    $applicationRoot = siteApplicationRoot($domain, $document_root);
-    clearstatcache(true, $applicationRoot);
-    $account = posix_getpwnam($identity);
-    if (!file_exists("/etc/php/$php_v/fpm/pool.d/$identity.conf") || !$account ||
-        (is_dir($applicationRoot) && fileowner($applicationRoot) !== $account['uid'])) {
-        isolateSite($domain, $document_root, $php_v);
-    }
     $port = $is_ssl ? 443 : 80;
     $vhost = "<VirtualHost *:$port>\n";
     $vhost .= "    ServerName $domain\n";
     $vhost .= "    ServerAlias www.$domain pma.$domain phpmyadmin.$domain\n";
     $vhost .= "    DocumentRoot $document_root\n";
     $vhost .= "    DirectoryIndex index.php index.html\n";
-    $vhost .= "    LwhGuardSiteHandler \"proxy:unix:$siteSocket|fcgi://localhost/\"\n";
-    $vhost .= "    LwhGuardPanelHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
     $vhost .= "    ErrorLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_error.log\n";
     $vhost .= "    CustomLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_access.log combined\n\n";
     
@@ -230,25 +167,10 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     $vhost .= "    RewriteRule ^/(.*)$ /phpmyadmin/$1 [L,PT]\n\n";
 
     $vhost .= "    <Directory $document_root>\n";
-    $vhost .= "        Options -Indexes -FollowSymLinks +SymLinksIfOwnerMatch\n";
-    // Live .htaccess support, as in ISPConfig. Keep symlink/CGI options controlled
-    // by root while allowing rewrites, headers, authentication and cache rules.
-    $vhost .= "        AllowOverride All Options=Indexes,MultiViews,SymLinksIfOwnerMatch\n";
+    $vhost .= "        Options -Indexes +FollowSymLinks\n";
+    $vhost .= "        AllowOverride All\n";
     $vhost .= "        Require all granted\n";
     $vhost .= "    </Directory>\n\n";
-    // Location sections merge after .htaccess: the PHP identity belongs to the
-    // vhost, while applications keep control of their URL and access rules.
-    if ($php_enabled) {
-        $vhost .= "    <Location />\n";
-        $vhost .= "        <If \"-f '%{REQUEST_FILENAME}' && %{REQUEST_FILENAME} =~ m#\\.php$#\">\n";
-        $vhost .= "            SetHandler \"proxy:unix:$siteSocket|fcgi://localhost/\"\n";
-        $vhost .= "        </If>\n        <Else>\n            SetHandler default-handler\n        </Else>\n";
-        $vhost .= "    </Location>\n";
-        $vhost .= "    <LocationMatch ^/(phpmyadmin|dbadmin)(/|$)>\n";
-        $vhost .= "        <If \"-f '%{REQUEST_FILENAME}' && %{REQUEST_FILENAME} =~ m#\\.php$#\">\n";
-        $vhost .= "            SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
-        $vhost .= "        </If>\n    </LocationMatch>\n";
-    }
     
     // DB Manager access (Global Alias)
     $db_manager = defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'phpmyadmin';
@@ -268,9 +190,8 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     }
     
     if ($php_enabled) {
-        $php_socket_site = $siteSocket;
         $vhost .= "    <FilesMatch \.php$>\n";
-        $vhost .= "        SetHandler \"proxy:unix:$php_socket_site|fcgi://localhost/\"\n";
+        $vhost .= "        SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
         $vhost .= "    </FilesMatch>\n";
         
         try {
@@ -383,26 +304,6 @@ try {
     // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root
 }
 
-// Migrate existing sites once. Keep the marker absent until every site succeeds.
-if (!$pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'migration_site_isolation_v1'")->fetchColumn()) {
-    $migrationSites = $pdo->query('SELECT domain, document_root FROM sys_sites')->fetchAll();
-    // Validate the whole inventory before changing any site's ownership.
-    $containers = [];
-    foreach ($migrationSites as $existingSite) {
-        $container = siteApplicationRoot($existingSite['domain'], $existingSite['document_root']);
-        if (isset($containers[$container])) throw new RuntimeException('Dos sitios comparten un contenedor; revisar antes de migrar.');
-        $containers[$container] = true;
-    }
-    $isolationBatch = true;
-    foreach ($migrationSites as $existingSite) {
-        isolateSite($existingSite['domain'], $existingSite['document_root'], $php_v);
-        $pdo->prepare("INSERT INTO sys_tasks (task_type, payload) VALUES ('SITE_UPDATE_PHP_SETTINGS', ?)")->execute([json_encode(['domain' => $existingSite['domain']])]);
-    }
-    $isolationBatch = false;
-    checkedCommand('/usr/bin/systemctl restart php' . $php_v . '-fpm');
-    checkedCommand('/usr/bin/systemctl restart apache2');
-    $pdo->exec("INSERT INTO sys_settings (setting_key, setting_value) VALUES ('migration_site_isolation_v1', '1')");
-}
 // A previous process died while working. Never replay destructive work automatically.
 $pdo->exec("UPDATE sys_tasks SET status = 'error', result_msg = 'Motor interrumpido. Revisar el resultado antes de reintentar.' WHERE status = 'running'");
 // 1. Buscar tareas pendientes
@@ -430,7 +331,7 @@ foreach ($tasks as $task) {
             $php = $payload['php_enabled'];
             if (!is_dir($path)) {
                 mkdir($path, 0755, true);
-                isolateSite($domain, $path, $php_v);
+                prepareSharedSite($domain, $path, $php_v);
             }
 
             // Copiar index.html inicial si el directorio está vacío (o si es el root principal /var/www/html)
@@ -450,9 +351,9 @@ foreach ($tasks as $task) {
                 
                 if (!file_exists($indexPath) && !file_exists($indexPhpPath)) {
                     copy($templatePath, $indexPath);
-                    chown($indexPath, siteUser($domain));
-                    chgrp($indexPath, siteUser($domain));
-                    chmod($indexPath, 0660);
+                    chown($indexPath, 'www-data');
+                    chgrp($indexPath, 'www-data');
+                    chmod($indexPath, 0644);
                 }
             }
             file_put_contents("/etc/apache2/sites-available/$domain.conf", generateVhost($domain, $path, $php, $php_v));
@@ -992,7 +893,7 @@ foreach ($tasks as $task) {
             $timestamp = date('Ymd_His');
             $backupFile = "backup_{$domain}_{$timestamp}.tar.gz";
             $tmpDir = privateWorkdir();
-            $tmpTar = $tmpDir . ".tar.gz";
+            $tmpTar = "$tmpDir/$backupFile";
             
             $config = [
                 'domain' => $domain,
@@ -1183,7 +1084,7 @@ foreach ($tasks as $task) {
                 if (is_link($restoreRoot)) throw new RuntimeException('La raíz no puede ser un enlace.');
                 checkedCommand("find $docRoot -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +");
                 checkedCommand("cp -a " . escapeshellarg("$tmpDir/webroot/.") . " $docRoot/");
-                isolateSite($domain, $siteData['document_root'], $php_v);
+                prepareSharedSite($domain, $siteData['document_root'], $php_v);
             }
             
             shell_exec("rm -rf " . escapeshellarg($tmpDir));

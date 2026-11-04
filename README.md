@@ -1,61 +1,25 @@
-> Actualizaciones temporalmente suspendidas. El instalador no aplica cambios mientras se valida la reversion al pool PHP compartido.
-
 # 🚀 Lightweight-Hosting
 
 **Sistema de hosting ultra-ligero** diseñado para hardware extremadamente limitado (1vCore, 1GB RAM) ejecutándose sobre **Debian 13**.
 
 Este componente es el núcleo del ecosistema **Lightweight**.
 
-## Endurecimiento del panel y del motor
+## Estado de las actualizaciones
 
-Los endpoints comprueban sesión y CSRF antes de procesar acciones. El instalador
-migra la contraseña del panel a un hash y protege el código y la configuración
-contra escritura por PHP. Las conexiones DNS requieren HTTPS y certificados
-válidos; los nodos con certificados autofirmados necesitan una CA de confianza.
+**Instalador temporalmente bloqueado** antes de aplicar cualquier cambio. El
+canal anuncia 1.4.42 para evitar desplegar la migración experimental esta noche.
 
-La primera ejecución del motor migra los sitios existentes a usuarios y pools
-PHP independientes, con sesiones privadas. Esta migración cambia propietarios y
-permisos y reinicia Apache y PHP-FPM. Debe probarse antes en un servidor de ensayo
-con copia recuperable. Los sitios conservan `.htaccess` activo: cambios en
-reescrituras, redirecciones, cabeceras, caché y controles de acceso se aplican
-sin regenerar el vhost. El perfil permite `All` con las opciones limitadas a
-`Indexes,MultiViews,SymLinksIfOwnerMatch`; `FollowSymLinks` y `ExecCGI` no se
-pueden activar desde un sitio. La migración adapta automáticamente las opciones
-`FollowSymLinks` a `SymLinksIfOwnerMatch`, conservando una copia privada del
-`.htaccess` anterior fuera del directorio público. Las demás reglas siguen vivas.
+Se restaura el modelo ligero anterior: las webs usan **un único pool PHP-FPM
+compartido como www-data**, en modo ondemand. No se crean usuarios ni pools por
+sitio ni se amplían los límites de concurrencia anteriores.
 
-La asignación del handler PHP permanece bajo control del vhost. El módulo
-pequeño `mod_lwh_guard` bloquea en la fase de fixups los proxies distribuidos
-(`[P]`) y handlers de otros pools; un proxy inverso necesita configuración
-administrativa específica. El instalador compila el módulo desde el código
-incluido utilizando `apache2-dev`, sin añadir otro servicio en ejecución.
-La referencia de compatibilidad es el vhost y el valor `allow_override` de
-[ISPConfig 3.3.2p1](https://www.ispconfig.org/ispconfig/download/).
-Los pools arrancan bajo demanda, con dos procesos por pool y un máximo global de
-cuatro procesos FPM para el perfil de 1 GB. En servidores con más memoria, el
-instalador calcula un límite global mayor y permite hasta diez procesos por pool.
+Se conservan las correcciones independientes de autenticación, CSRF, validación
+de rutas, TLS DNS y comprobación de backups. Los backups nuevos abarcan el
+contenedor completo de aplicaciones con public anidado, conservan sus enlaces
+internos en forma portable y no aplican retención si falla la copia nueva.
 
-Se admiten raíces públicas anidadas dentro del contenedor propio, por ejemplo
-`/var/www/vhosts/example.com/public`. El aislamiento, las exportaciones y los
-backups abarcan toda la aplicación, incluidos `storage`, `vendor` y su
-configuración, conservando enlaces internos. Los backups nuevos incluyen formato
-de archivo; las copias antiguas mantienen su restauración sobre la raíz pública.
-Se validan todas las rutas antes de comenzar la migración de propietarios.
-
-El update nocturno y los backups mantienen las 03:00 en la zona horaria del
-servidor. El instalador y el motor comparten un bloqueo para evitar solaparse.
-Una tarea interrumpida se marca con error para revisión, sin repetir operaciones
-destructivas automáticamente. Las exportaciones se guardan fuera del directorio
-público; los enlaces antiguos a `/downloads/` quedan bloqueados.
-
-Los backups comprueban el volcado, la compresión y la subida antes de aplicar
-retención. Un borrado remoto fallido conserva su registro. Las copias SQL usan
-`--single-transaction` (consistencia para tablas transaccionales); archivos y
-bases de datos no constituyen una instantánea atómica conjunta. La restauración
-real con MariaDB, MEGA y servicios Debian debe validarse en el servidor de ensayo.
-
-Validación local adicional: `python tests/security_http_test.py` (requiere PHP y
-Node) y `php tests/backup_failure_test.php`, además de la prueba de cola DNS.
+La recuperación de las máquinas de prueba usa sus configuraciones y metadatos
+anteriores. Las actualizaciones no se reanudan hasta validar el perfil compartido.
 
 ## 🚀 Instalación Rápida desde GitHub
 

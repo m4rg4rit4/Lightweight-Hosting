@@ -1,7 +1,6 @@
 #!/bin/bash
-# Updates temporarily frozen while restoring the validated shared PHP model.
-# Exit before package, database, permissions, or service changes.
-echo "Lightweight-Hosting: actualizaciones temporalmente suspendidas durante la reversion al pool PHP compartido." >&2
+# Automatic and manual installer runs are frozen during shared-pool recovery.
+echo "Lightweight-Hosting: actualizaciones temporalmente suspendidas; se restaura el pool PHP compartido." >&2
 exit 75
 
 
@@ -244,25 +243,15 @@ if [ -z "$PHP_VERSION" ]; then
 fi
 
 POOL_FILE="/etc/php/${PHP_VERSION}/fpm/pool.d/www.conf"
-FPM_GLOBAL_LIMIT=4
-FPM_POOL_LIMIT=2
-FPM_MEMORY_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
-if [ "${FPM_MEMORY_KB:-0}" -ge 1572864 ]; then
-    FPM_GLOBAL_LIMIT=$((FPM_MEMORY_KB / 131072 - 4))
-    [ "$FPM_GLOBAL_LIMIT" -le 32 ] || FPM_GLOBAL_LIMIT=32
-    FPM_POOL_LIMIT=$((FPM_GLOBAL_LIMIT / 2))
-    [ "$FPM_POOL_LIMIT" -le 10 ] || FPM_POOL_LIMIT=10
-fi
 
 if [ -f "$POOL_FILE" ]; then
     sed -i 's/^pm = dynamic/pm = ondemand/' $POOL_FILE
-    sed -i "s/^pm.max_children = .*/pm.max_children = $FPM_POOL_LIMIT/" $POOL_FILE
+    sed -i 's/^pm.max_children = 5/pm.max_children = 10/' $POOL_FILE
     sed -i 's/^;pm.process_idle_timeout = 10s;/pm.process_idle_timeout = 30s;/' $POOL_FILE
 else
     printf "${RED}No se encontró el archivo de configuración del pool: $POOL_FILE${NC}\n"
 fi
 
-sed -i "s/^;*process.max = .*/process.max = $FPM_GLOBAL_LIMIT/" "/etc/php/${PHP_VERSION}/fpm/php-fpm.conf"
 PHP_INI_FILE="/etc/php/${PHP_VERSION}/fpm/php.ini"
 if [ -f "$PHP_INI_FILE" ]; then
     sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 128M/' $PHP_INI_FILE
@@ -498,7 +487,6 @@ curl -fsSL "$REPO_RAW/src/admin/admin-style.css" -o "$TEMP_DIR/admin-style.css" 
 curl -fsSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template" || exit 1
 curl -fsSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php" || exit 1
 curl -fsSL "$REPO_RAW/src/engine/archive_links.py" -o "$TEMP_DIR/archive_links.py" || exit 1
-curl -fsSL "$REPO_RAW/src/engine/mod_lwh_guard.c" -o "$TEMP_DIR/mod_lwh_guard.c" || exit 1
 curl -fsSL "$REPO_RAW/src/engine/certbot_dns_auth.php" -o "$TEMP_DIR/certbot_dns_auth.php" || exit 1
 curl -fsSL "$REPO_RAW/src/engine/certbot_dns_cleanup.php" -o "$TEMP_DIR/certbot_dns_cleanup.php" || exit 1
 curl -fsSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template" || exit 1
@@ -517,12 +505,6 @@ fi
 for staged_php in "$TEMP_DIR"/*.php; do php -l "$staged_php" >/dev/null || exit 1; done
 for staged_shell in "$TEMP_DIR"/*.sh; do bash -n "$staged_shell" || exit 1; done
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$TEMP_DIR/archive_links.py" || exit 1
-# A small fixups hook blocks distributed proxy rules from reaching another
-# site's FPM pool. It preserves live .htaccess and has no extra daemon.
-apt install -y apache2-dev >/dev/null || exit 1
-(cd "$TEMP_DIR" && apxs -c mod_lwh_guard.c && apxs -i mod_lwh_guard.la) >/dev/null 2>&1 || exit 1
-printf '%s\n' 'LoadModule lwh_guard_module /usr/lib/apache2/modules/mod_lwh_guard.so' > /etc/apache2/mods-available/lwh_guard.load
-a2enmod lwh_guard >/dev/null || exit 1
 cp "$TEMP_DIR/index.php" "$ADMIN_PATH/index.php"
 cp "$TEMP_DIR/tasks.php" "$ADMIN_PATH/tasks.php"
 cp "$TEMP_DIR/tasks_status.php" "$ADMIN_PATH/tasks_status.php"
