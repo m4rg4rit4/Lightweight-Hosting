@@ -1,3 +1,9 @@
+#!/bin/bash
+# Updates temporarily frozen while restoring the validated shared PHP model.
+# Exit before package, database, permissions, or service changes.
+echo "Lightweight-Hosting: actualizaciones temporalmente suspendidas durante la reversion al pool PHP compartido." >&2
+exit 75
+
 
 #!/bin/bash
 

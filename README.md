@@ -1,3 +1,5 @@
+> Actualizaciones temporalmente suspendidas. El instalador no aplica cambios mientras se valida la reversion al pool PHP compartido.
+
 # 🚀 Lightweight-Hosting
 
 **Sistema de hosting ultra-ligero** diseñado para hardware extremadamente limitado (1vCore, 1GB RAM) ejecutándose sobre **Debian 13**.
