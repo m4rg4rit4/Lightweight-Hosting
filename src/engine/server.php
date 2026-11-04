@@ -182,7 +182,12 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     global $php_socket, $pdo;
     $siteSocket = "/run/php/" . siteUser($domain) . ".sock";
     $identity = siteUser($domain);
-    if (!file_exists("/etc/php/$php_v/fpm/pool.d/$identity.conf")) isolateSite($domain, $document_root, $php_v);
+    clearstatcache(true, $document_root);
+    $account = posix_getpwnam($identity);
+    if (!file_exists("/etc/php/$php_v/fpm/pool.d/$identity.conf") || !$account ||
+        (is_dir($document_root) && fileowner($document_root) !== $account['uid'])) {
+        isolateSite($domain, $document_root, $php_v);
+    }
     $port = $is_ssl ? 443 : 80;
     $vhost = "<VirtualHost *:$port>\n";
     $vhost .= "    ServerName $domain\n";

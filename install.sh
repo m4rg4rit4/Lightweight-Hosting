@@ -420,7 +420,9 @@ printf "${YELLOW}Configurando el sitio principal para $FULL_FQDN...${NC}\n"
 # El document_root por defecto será /var/www/html para el sitio principal
 MAIN_ROOT="/var/www/html"
 mkdir -p "$MAIN_ROOT"
-chown -R www-data:www-data "$MAIN_ROOT"
+if [ "$IS_UPDATE" = false ]; then
+    chown -R www-data:www-data "$MAIN_ROOT"
+fi
 
 # Insertar en base de datos
 mariadb -u root -p"$DB_ROOT_PASS" -D dbadmin -e "INSERT IGNORE INTO sys_sites (domain, document_root, php_enabled, status) VALUES ('$FULL_FQDN', '$MAIN_ROOT', 1, 'pending');"
