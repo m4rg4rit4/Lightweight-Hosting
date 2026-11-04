@@ -5,6 +5,8 @@
  */
 
 if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.use_strict_mode', '1');
+    session_set_cookie_params(['httponly' => true, 'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off', 'samesite' => 'Strict', 'path' => '/']);
     session_start();
 }
 
@@ -27,6 +29,18 @@ if (!$configLoaded) {
     die("Error: config.php no encontrado. Ejecuta el instalador primero.");
 }
 
+function csrfToken() {
+    if (empty($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    return $_SESSION['csrf_token'];
+}
+function checkCsrf() {
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') return;
+    $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $_POST['csrf_token'] ?? '';
+    if (!is_string($token) || !hash_equals(csrfToken(), $token)) {
+        http_response_code(403);
+        exit('Solicitud caducada o no válida. Recarga la página.');
+    }
+}
 // Función para verificar si el usuario está logueado
 function checkAuth() {
     if (defined('DISABLE_LOGIN') && DISABLE_LOGIN === true) {
@@ -50,6 +64,10 @@ function checkAuth() {
 
 // Manejo de Logout
 if (isset($_GET['logout'])) {
+    if (!isset($_GET['csrf_token']) || !is_string($_GET['csrf_token']) || !hash_equals(csrfToken(), $_GET['csrf_token'])) {
+        http_response_code(403);
+        exit('Solicitud no válida.');
+    }
     $_SESSION = [];
     if (ini_get("session.use_cookies")) {
         $params = session_get_cookie_params();

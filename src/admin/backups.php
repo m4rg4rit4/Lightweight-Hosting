@@ -1,6 +1,7 @@
 <?php
-session_start();
-require 'config.php';
+require_once __DIR__ . '/auth.php';
+checkAuth();
+checkCsrf();
 $pdo = getPDO();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -32,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg_type = 'info';
                 break;
             case 'set_retention':
-                $days = (int)($_POST['retention_days'] ?? 7);
+                $days = max(1, min(3650, (int)($_POST['retention_days'] ?? 7)));
                 $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('backup_retention_days', ?)")->execute([$days]);
                 $msg = "Retención configurada a $days días.";
                 $msg_type = 'success';
@@ -162,17 +163,17 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
                                 <input type="number" name="retention_days" value="<?php echo htmlspecialchars($retentionDays); ?>" style="width: 80px; padding: 6px 10px;" min="1" max="365">
                                 <button type="submit" class="btn btn-outline btn-sm">Guardar</button>
                             </div>
-                        </form>
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                         
                         <form method="POST" onsubmit="return confirm('¿Seguro que quieres buscar y sincronizar copias antiguas desde MEGA?');">
                             <input type="hidden" name="action" value="mega_sync">
                             <button type="submit" class="btn btn-outline btn-sm">Sincronizar</button>
-                        </form>
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                         
                         <form method="POST" onsubmit="return confirm('¿Seguro que quieres desvincular MEGA? No se podrán hacer ni restaurar backups.');">
                             <input type="hidden" name="action" value="mega_logout">
                             <button type="submit" class="btn btn-danger btn-sm">Desvincular</button>
-                        </form>
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                     </div>
                 </div>
             <?php else: ?>
@@ -191,7 +192,7 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
                         <input type="password" name="mega_pass" required>
                     </div>
                     <button type="submit" class="btn btn-primary" style="height: 41px;">Vincular y Conectar</button>
-                </form>
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
             <?php endif; ?>
         </div>
 
@@ -219,13 +220,13 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
                             <option value="daily" <?php echo ($site['backup_frequency'] ?? '') === 'daily' ? 'selected' : ''; ?>>Diaria</option>
                             <option value="weekly" <?php echo ($site['backup_frequency'] ?? '') === 'weekly' ? 'selected' : ''; ?>>Semanal (Dom)</option>
                         </select>
-                    </form>
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                     
                     <form method="POST">
                         <input type="hidden" name="action" value="backup_now">
                         <input type="hidden" name="site_id" value="<?php echo $site['id']; ?>">
                         <button type="submit" class="btn btn-primary btn-sm" <?php echo (!$megaEmail || $megaStatus !== 'logged_in') ? 'disabled style="opacity:0.5"' : ''; ?>>+ Copia Ahora</button>
-                    </form>
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                 </div>
             </div>
             <div class="site-body">
@@ -264,7 +265,7 @@ $megaTaskPending = $pdo->query("SELECT COUNT(*) FROM sys_tasks WHERE task_type L
                                         <button type="submit" class="btn btn-outline btn-sm btn-danger" <?php echo (!$megaEmail || $megaStatus !== 'logged_in') ? 'disabled style="opacity:0.5"' : ''; ?>>
                                             Restaurar
                                         </button>
-                                    </form>
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                                 </td>
                             </tr>
                             <?php endforeach; ?>

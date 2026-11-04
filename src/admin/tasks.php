@@ -1,6 +1,7 @@
 <?php
-session_start();
-require 'config.php';
+require_once __DIR__ . '/auth.php';
+checkAuth();
+checkCsrf();
 $pdo = getPDO();
 require_once 'dns_utils.php';
 $dnsTasks = [];
@@ -178,7 +179,7 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50"
                     <button type="submit" class="btn-action btn-danger" style="padding: 8px 16px; font-size: 0.8rem;">
                         Limpiar Historial
                     </button>
-                </form>
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                 <div style="font-size: 0.85rem; color: var(--text-dim);">Últimas 50 tareas</div>
             </div>
         </div>
@@ -237,7 +238,7 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50"
                                 <input type="hidden" name="action" value="cancel_task">
                                 <input type="hidden" name="task_id" value="<?php echo $t['id']; ?>">
                                 <button type="submit" class="btn-action">Cancelar</button>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <?php endif; ?>
                             
                             <form method="POST" onsubmit="return confirm('¿Seguro que deseas ELIMINAR permanentemente esta tarea del historial?');">
@@ -246,7 +247,7 @@ $tasks = $pdo->query("SELECT * FROM sys_tasks ORDER BY created_at DESC LIMIT 50"
                                 <button type="submit" class="btn-action btn-danger" title="Eliminar Tarea">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                 </button>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                         </div>
                     </td>
                 </tr>

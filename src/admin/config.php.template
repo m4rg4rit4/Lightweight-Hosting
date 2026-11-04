@@ -4,6 +4,8 @@ define('DB_NAME', 'dbadmin');
 define('DB_USER', 'dbadmin');
 define('DB_PASS', '{{DB_ADMIN_PASS}}');
 define('ADMIN_EMAIL', '{{ADMIN_EMAIL}}');
+define('ADMIN_USER', '{{ADMIN_USER}}');
+define('ADMIN_PASS_HASH', '{{ADMIN_PASS_HASH}}');
 define('DNS_HOSTNAME', '{{DNS_HOSTNAME}}');
 define('LETSENCRYPT_EMAIL', '{{LETSENCRYPT_EMAIL}}');
 // define('LETSENCRYPT_EMAIL', '{{ADMIN_EMAIL}}');

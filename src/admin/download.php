@@ -25,10 +25,10 @@ if (!preg_match('/^export_[a-z0-9.-]+_[a-f0-9]{32}\.tar\.gz$/', $file)) {
     die("Error: Nombre de archivo no válido.");
 }
 
-$downloadsDir = __DIR__ . '/downloads';
+$downloadsDir = '/var/lib/lightweight-hosting/exports';
 $filePath = $downloadsDir . '/' . $file;
 
-if (!file_exists($filePath)) {
+if (is_link($filePath) || !is_file($filePath)) {
     die("Error: El archivo de exportación no existe o ya ha sido descargado.");
 }
 

@@ -1,7 +1,9 @@
 <?php
-session_start();
-require 'config.php';
+require_once __DIR__ . '/auth.php';
+checkAuth();
+checkCsrf();
 
+umask(0007);
 $pdo = getPDO();
 
 $siteId = (int)($_GET['site_id'] ?? $_POST['site_id'] ?? 0);
@@ -18,11 +20,7 @@ if (!$site) {
 }
 
 $baseDir = rtrim($site['document_root'], '/');
-if (!is_dir($baseDir)) {
-    @mkdir($baseDir, 0755, true);
-    @chown($baseDir, 'www-data');
-    @chgrp($baseDir, 'www-data');
-}
+if (!is_dir($baseDir) || is_link($baseDir)) { http_response_code(409); exit('El motor debe preparar primero el sitio.'); }
 
 // Validation function against path traversal
 function getValidPath($baseDir, $requestedPath) {
@@ -50,8 +48,8 @@ function formatSize($bytes) {
 
 // Ensure correct permissions and ownership
 function fixOwnership($path) {
-    @chown($path, 'www-data');
-    @chgrp($path, 'www-data');
+    // Retain the site's inherited group for access by its PHP worker.
+    @chmod($path, is_dir($path) ? 02770 : 0660);
 }
 
 // API Endpoints
@@ -112,14 +110,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
             case 'upload':
                 $targetDir = getValidPath($baseDir, $path);
-                if (!$targetDir) $targetDir = $baseDir . '/' . ltrim($path, '/');
-                if (!is_dir($targetDir)) @mkdir($targetDir, 0755, true);
+                if (!$targetDir || !is_dir($targetDir)) throw new Exception('Ruta destino inválida.');
                 
                 if (isset($_FILES['file'])) {
-                    $targetFile = $targetDir . '/' . basename($_FILES['file']['name']);
+                    if ($_FILES['file']['error'] !== UPLOAD_ERR_OK) throw new Exception('Subida incompleta.');
+                    $name = basename($_FILES['file']['name']);
+                    if ($name === '' || $name === '.' || $name === '..') throw new Exception('Nombre inválido.');
+                    $targetFile = $targetDir . '/' . $name;
+                    if (is_link($targetFile)) throw new Exception('No se permite sobrescribir enlaces.');
                     if (move_uploaded_file($_FILES['file']['tmp_name'], $targetFile)) {
                         fixOwnership($targetFile);
-                        @chmod($targetFile, 0644);
+                        @chmod($targetFile, 0660);
                         echo json_encode(['success' => true]);
                     } else {
                         throw new Exception("Error al subir el archivo.");
@@ -144,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception("Operación no permitida.");
                 }
                 
-                if (file_exists($newItemPath)) {
+                if (is_link($newItemPath) || file_exists($newItemPath)) {
                     throw new Exception("El elemento ya existe.");
                 }
                 
@@ -153,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     fixOwnership($newItemPath);
                 } else {
                     file_put_contents($newItemPath, "");
-                    @chmod($newItemPath, 0644);
+                    @chmod($newItemPath, 0660);
                     fixOwnership($newItemPath);
                 }
                 echo json_encode(['success' => true]);
@@ -183,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $parentDir = dirname($fullPath);
                 $newPath = $parentDir . '/' . basename($newName);
                 
-                if (file_exists($newPath)) throw new Exception("Ese nombre ya está en uso.");
+                if (is_link($newPath) || file_exists($newPath)) throw new Exception("Ese nombre ya está en uso.");
                 if (rename($fullPath, $newPath)) {
                     echo json_encode(['success' => true]);
                 } else {
@@ -682,6 +683,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             return result;
         }
 
+        function safeHtml(value) {
+            return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function jsArg(value) { return safeHtml(JSON.stringify(value)); }
         function updateBreadcrumb() {
             const bc = document.getElementById('breadcrumb');
             let html = `<span class="breadcrumb-item" onclick="loadFiles('')">/raíz</span>`;
@@ -690,7 +695,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 let builtPath = '';
                 parts.forEach((p, idx) => {
                     builtPath += '/' + p;
-                    html += ` <span class="breadcrumb-sep">&rsaquo;</span> <span class="breadcrumb-item" onclick="loadFiles('${builtPath}')">${p}</span>`;
+                    html += ` <span class="breadcrumb-sep">&rsaquo;</span> <span class="breadcrumb-item" onclick="loadFiles(${jsArg(builtPath)})">${safeHtml(p)}</span>`;
                 });
             }
             bc.innerHTML = html;
@@ -724,11 +729,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         let parentPath = currentPath.split('/');
                         parentPath.pop();
                         parentPath = parentPath.join('/');
-                        nameHtml = `<div class="dir-row" onclick="loadFiles('${parentPath}')"><span class="file-icon">📁</span> .. (Arriba)</div>`;
+                        nameHtml = `<div class="dir-row" onclick="loadFiles(${jsArg(parentPath)})"><span class="file-icon">📁</span> .. (Arriba)</div>`;
                     } else if (f.type === 'dir') {
-                        nameHtml = `<div class="dir-row" onclick="loadFiles('${fullItemPath}')"><span class="file-icon">📁</span> ${f.name}</div>`;
+                        nameHtml = `<div class="dir-row" onclick="loadFiles(${jsArg(fullItemPath)})"><span class="file-icon">📁</span> ${safeHtml(f.name)}</div>`;
                     } else {
-                        nameHtml = `<div class="file-row"><span class="file-icon">📄</span> ${f.name}</div>`;
+                        nameHtml = `<div class="file-row"><span class="file-icon">📄</span> ${safeHtml(f.name)}</div>`;
                     }
                     
                     let actionsHtml = '';
@@ -738,10 +743,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <div class="actions-dropdown">
                                 <button class="btn btn-outline btn-sm">Opciones ▼</button>
                                 <div class="actions-content">
-                                    ${(f.type === 'file' && isText) ? `<a href="#" onclick="openEditor('${fullItemPath}')">Editar (Texto)</a>` : ''}
-                                    <a href="#" onclick="showRename('${fullItemPath}', '${f.name}')">Renombrar</a>
-                                    <a href="#" onclick="showChmod('${fullItemPath}', '${f.perms}')">Permisos</a>
-                                    <a href="#" class="text-danger" onclick="deleteItem('${fullItemPath}')">Borrar</a>
+                                    ${(f.type === 'file' && isText) ? `<a href="#" onclick="openEditor(${jsArg(fullItemPath)})">Editar (Texto)</a>` : ''}
+                                    <a href="#" onclick="showRename(${jsArg(fullItemPath)}, ${jsArg(f.name)})">Renombrar</a>
+                                    <a href="#" onclick="showChmod(${jsArg(fullItemPath)}, ${jsArg(f.perms)})">Permisos</a>
+                                    <a href="#" class="text-danger" onclick="deleteItem(${jsArg(fullItemPath)})">Borrar</a>
                                 </div>
                             </div>
                         `;

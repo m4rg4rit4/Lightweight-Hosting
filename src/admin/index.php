@@ -1,6 +1,7 @@
 <?php
-session_start();
-require 'config.php';
+require_once __DIR__ . '/auth.php';
+checkAuth();
+checkCsrf();
 require_once 'dns_utils.php';
 $pdo = getPDO();
 
@@ -13,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $domain = strtolower(trim($_POST['domain']));
         $php = isset($_POST['php']) ? 1 : 0;
         
-        if (!preg_match('/^[a-z0-9.-]+$/', $domain) || empty($domain) || strlen($domain) > 255) {
+        if (strlen($domain) > 253 || !preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/D', $domain)) {
             $_SESSION['flash_msg'] = "Error: El nombre de dominio contiene caracteres no válidos.";
             $_SESSION['flash_type'] = "error";
             header("Location: " . $_SERVER['PHP_SELF'] . '?new=1');
@@ -250,7 +251,7 @@ if (hasDnsServers()) {
                     <button type="submit" class="btn btn-primary">Crear Sitio</button>
                     <button type="button" onclick="toggleNewSiteForm()" class="btn btn-outline">Cancelar</button>
                 </div>
-            </form>
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
         </div>
 
         <table>
@@ -285,7 +286,7 @@ if (hasDnsServers()) {
                                     <span style="color: var(--text-dim);">○</span> Inactivo
                                 <?php endif; ?>
                             </button>
-                        </form>
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                         <?php if ($s['php_enabled'] == 1): ?>
                         <div style="margin-top: 4px;">
                             <button type="button" class="btn btn-outline btn-sm" style="font-size: 0.8rem; padding: 2px 8px; color: var(--text-dim);" onclick="openPhpConfigModal(<?php echo $s['id']; ?>, '<?php echo htmlspecialchars($s['domain']); ?>', '<?php echo htmlspecialchars($s['php_upload_max_filesize'] ?? '20M'); ?>', '<?php echo htmlspecialchars($s['php_post_max_size'] ?? '25M'); ?>', <?php echo htmlspecialchars($s['php_max_file_uploads'] ?? 20); ?>, '<?php echo htmlspecialchars($s['php_memory_limit'] ?? '128M'); ?>')" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>
@@ -315,7 +316,7 @@ if (hasDnsServers()) {
                                         <span style="color: var(--text-dim);">🔓</span> Sin SSL
                                     <?php endif; ?>
                                 </button>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <?php if ($isManaged): ?>
                             <form method="POST" style="display:inline;">
                                 <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
@@ -323,7 +324,7 @@ if (hasDnsServers()) {
                                 <button type="submit" class="btn btn-outline btn-sm" style="width: 100%; text-align: left;" <?php echo ($s['status'] !== 'active' || $s['is_processing'] > 0) ? 'disabled' : ''; ?>>
                                     <span style="color: var(--info);">✨</span> Wildcard (*.)
                                 </button>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <?php endif; ?>
                         </div>
                     </td>
@@ -343,12 +344,12 @@ if (hasDnsServers()) {
                                 <button type="submit" class="btn btn-outline btn-sm" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>
                                     <?php echo ($s['status'] === 'active') ? 'Desactivar' : 'Activar'; ?>
                                 </button>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <form method="POST" style="display:inline;" onsubmit="return confirm('¿Estás seguro de eliminar el dominio <?php echo $s['domain']; ?>?');">
                                 <input type="hidden" name="site_id" value="<?php echo $s['id']; ?>">
                                 <input type="hidden" name="action" value="delete">
                                 <button type="submit" class="btn btn-outline btn-sm btn-danger" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?>>Eliminar</button>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <?php else: ?>
                                 <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede desactivar" disabled>Desactivar</button>
                                 <button class="btn btn-outline btn-sm" style="opacity: 0.5; cursor: not-allowed;" title="El sitio principal no se puede eliminar" disabled>Eliminar</button>
@@ -356,7 +357,7 @@ if (hasDnsServers()) {
                             <a href="databases.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--info);">BBDD</a>
                             <a href="filemanager.php?site_id=<?php echo $s['id']; ?>" class="btn btn-outline btn-sm" style="color: var(--warning);">Archivos</a>
                             <?php
-                            $exportFiles = glob(__DIR__ . '/downloads/export_' . $s['domain'] . '_*.tar.gz');
+                            $exportFiles = glob('/var/lib/lightweight-hosting/exports/export_' . $s['domain'] . '_*.tar.gz');
                             $exportReady = !empty($exportFiles);
                             if ($exportReady):
                                 $exportFileName = basename($exportFiles[0]);
@@ -369,7 +370,7 @@ if (hasDnsServers()) {
                                     <button type="submit" class="btn btn-outline btn-sm" style="color: #c084fc; border-color: rgba(192, 132, 252, 0.3);" <?php echo ($s['is_processing'] > 0) ? 'disabled' : ''; ?> title="Comprimir sitio y bases de datos">
                                         📦 Exportar
                                     </button>
-                                </form>
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <?php endif; ?>
                         </div>
                     </td>
@@ -415,7 +416,7 @@ if (hasDnsServers()) {
                         <button type="button" class="btn btn-outline" onclick="closePhpConfigModal()">Cancelar</button>
                         <button type="submit" class="btn btn-primary">Guardar</button>
                     </div>
-                </form>
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
             </div>
         </div>
 

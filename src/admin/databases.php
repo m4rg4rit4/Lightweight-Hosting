@@ -1,6 +1,7 @@
 <?php
-session_start();
-require 'config.php';
+require_once __DIR__ . '/auth.php';
+checkAuth();
+checkCsrf();
 $pdo = getPDO();
 
 $siteId = isset($_GET['site_id']) ? (int)$_GET['site_id'] : 0;
@@ -170,7 +171,7 @@ $processing_count = $is_processing->fetchColumn();
                 </div>
                 <button type="submit" class="btn btn-primary">Crear en Sistema</button>
                 <button type="button" onclick="toggleNewDbForm()" class="btn btn-outline" style="margin-left: 10px;">Cancelar</button>
-            </form>
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
         </div>
 
         <div style="background: rgba(14, 165, 233, 0.05); border: 1px solid rgba(14, 165, 233, 0.2); padding: 16px; border-radius: 12px; margin-bottom: 24px; display: flex; gap: 12px; align-items: flex-start;">
@@ -203,7 +204,7 @@ $processing_count = $is_processing->fetchColumn();
                                 <button type="button" onclick="togglePasswordVisibility('pass_<?php echo $db['id']; ?>', this)" style="position: absolute; right: 8px; background: none; border: none; color: var(--text-dim); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; padding: 0;" title="Ver/Ocultar contraseña">👁️</button>
                             </div>
                             <button type="submit" class="btn btn-outline btn-sm" style="padding: 6px 12px; font-size: 0.75rem; white-space: nowrap;">Cambiar</button>
-                        </form>
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                     </td>
                     <td>
                         <div style="display: flex; gap: 8px;">
@@ -211,7 +212,7 @@ $processing_count = $is_processing->fetchColumn();
                                 <input type="hidden" name="action" value="delete_db">
                                 <input type="hidden" name="db_id" value="<?php echo $db['id']; ?>">
                                 <button type="submit" class="btn btn-outline btn-danger" style="padding: 4px 8px; font-size: 0.7rem;">Eliminar</button>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                         </div>
                     </td>
                 </tr>

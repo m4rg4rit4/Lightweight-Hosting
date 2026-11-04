@@ -18,6 +18,14 @@ FORCE_SILENT=false
 ADMIN_PATH="/var/www/admin_panel"
 ENGINE_PATH="/usr/local/bin/hosting"
 
+# Serialize nightly/manual installs with the root task worker. The worker already
+# owns this lock when invoking an update itself.
+if [ "${LWH_ENGINE_UPDATE:-0}" != "1" ]; then
+    install -d -o root -g root -m 0700 /run/lightweight-hosting
+    exec 9>/run/lightweight-hosting/engine.lock
+    flock -x 9 || exit 1
+fi
+
 # Detectar banderas
 if echo "$*" | grep -q "/silent"; then
     FORCE_SILENT=true
@@ -67,7 +75,7 @@ ask_input() {
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION)
 else
-    VERSION=$(curl -sSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/VERSION 2>/dev/null | tr -d '[:space:]')
+    VERSION=$(curl -fsSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/VERSION 2>/dev/null | tr -d '[:space:]')
     VERSION=${VERSION:-"1.4.20"}
 fi
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
@@ -91,6 +99,7 @@ if [ -f "$EXISTING_CONFIG" ]; then
     # Cargar variables actuales para usarlas como defaults
     EXISTING_ADMIN_EMAIL=$(grep "'ADMIN_EMAIL'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_ADMIN_USER=$(grep "'ADMIN_USER'" "$EXISTING_CONFIG" | cut -d"'" -f4)
+    EXISTING_ADMIN_HASH=$(grep "'ADMIN_PASS_HASH'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_ADMIN_PASS=$(grep "'ADMIN_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_DB_MANAGER=$(grep "'DB_MANAGER_DIR'" "$EXISTING_CONFIG" | cut -d"'" -f4)
     EXISTING_DB_PASS=$(grep "'DB_PASS'" "$EXISTING_CONFIG" | cut -d"'" -f4)
@@ -181,11 +190,11 @@ apt update && apt upgrade -y || { printf "${RED}Error al actualizar APT. Abortan
 
 # 7. Instalación de paquetes esenciales (Mínimos)
 printf "${YELLOW}Instalando paquetes base...${NC}\n"
-apt install -y ufw curl git unzip cron certbot python3-certbot-apache dnsutils || { printf "${RED}Error al instalar paquetes base.${NC}\n"; exit 1; }
+apt install -y python3 ufw curl git unzip cron certbot python3-certbot-apache dnsutils || { printf "${RED}Error al instalar paquetes base.${NC}\n"; exit 1; }
 
 # Instalación de megacmd para copias de seguridad
 printf "${YELLOW}Instalando megacmd...${NC}\n"
-curl -sL https://mega.nz/linux/repo/Debian_13/amd64/megacmd-Debian_13_amd64.deb -o /tmp/megacmd.deb
+curl -sL https://mega.nz/linux/repo/Debian_13/amd64/megacmd-Debian_13_amd64.deb -o /tmp/megacmd.deb || exit 1
 apt install -y /tmp/megacmd.deb || { printf "${RED}Error al instalar megacmd.${NC}\n"; exit 1; }
 rm -f /tmp/megacmd.deb
 
@@ -231,12 +240,13 @@ POOL_FILE="/etc/php/${PHP_VERSION}/fpm/pool.d/www.conf"
 
 if [ -f "$POOL_FILE" ]; then
     sed -i 's/^pm = dynamic/pm = ondemand/' $POOL_FILE
-    sed -i 's/^pm.max_children = 5/pm.max_children = 10/' $POOL_FILE
+    sed -i 's/^pm.max_children = .*/pm.max_children = 2/' $POOL_FILE
     sed -i 's/^;pm.process_idle_timeout = 10s;/pm.process_idle_timeout = 30s;/' $POOL_FILE
 else
     printf "${RED}No se encontró el archivo de configuración del pool: $POOL_FILE${NC}\n"
 fi
 
+sed -i 's/^;*process.max = .*/process.max = 4/' "/etc/php/${PHP_VERSION}/fpm/php-fpm.conf"
 PHP_INI_FILE="/etc/php/${PHP_VERSION}/fpm/php.ini"
 if [ -f "$PHP_INI_FILE" ]; then
     sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 128M/' $PHP_INI_FILE
@@ -454,29 +464,30 @@ ADMIN_PASS=$(sanitize_var "$ADMIN_PASS")
 REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
 
 # Descargar archivos a /tmp primero
-curl -sSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php"
-curl -sSL "$REPO_RAW/src/admin/tasks.php" -o "$TEMP_DIR/tasks.php"
-curl -sSL "$REPO_RAW/src/admin/tasks_status.php" -o "$TEMP_DIR/tasks_status.php"
-curl -sSL "$REPO_RAW/src/admin/filemanager.php" -o "$TEMP_DIR/filemanager.php"
-curl -sSL "$REPO_RAW/src/admin/databases.php" -o "$TEMP_DIR/databases.php"
-curl -sSL "$REPO_RAW/src/admin/backups.php" -o "$TEMP_DIR/backups.php"
-curl -sSL "$REPO_RAW/src/admin/header.php" -o "$TEMP_DIR/header.php"
-curl -sSL "$REPO_RAW/src/admin/dns.php" -o "$TEMP_DIR/dns.php"
-curl -sSL "$REPO_RAW/src/admin/dns_utils.php" -o "$TEMP_DIR/dns_utils.php"
-curl -sSL "$REPO_RAW/src/admin/dns_servers.php" -o "$TEMP_DIR/dns_servers.php"
-curl -sSL "$REPO_RAW/src/admin/auth.php" -o "$TEMP_DIR/auth.php"
-curl -sSL "$REPO_RAW/src/admin/login.php" -o "$TEMP_DIR/login.php"
-curl -sSL "$REPO_RAW/src/admin/download.php" -o "$TEMP_DIR/download.php"
-curl -sSL "$REPO_RAW/src/admin/admin-style.css" -o "$TEMP_DIR/admin-style.css"
-curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
-curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
-curl -sSL "$REPO_RAW/src/engine/certbot_dns_auth.php" -o "$TEMP_DIR/certbot_dns_auth.php"
-curl -sSL "$REPO_RAW/src/engine/certbot_dns_cleanup.php" -o "$TEMP_DIR/certbot_dns_cleanup.php"
-curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
-curl -sSL "$REPO_RAW/src/engine/sync_monitor.sh" -o "$TEMP_DIR/sync_monitor.sh"
-curl -sSL "$REPO_RAW/src/engine/auto_backup.php" -o "$TEMP_DIR/auto_backup.php"
-curl -sSL "$REPO_RAW/autoupdate.sh" -o "$TEMP_DIR/autoupdate.sh"
-curl -sSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh"
+curl -fsSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/tasks.php" -o "$TEMP_DIR/tasks.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/tasks_status.php" -o "$TEMP_DIR/tasks_status.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/filemanager.php" -o "$TEMP_DIR/filemanager.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/databases.php" -o "$TEMP_DIR/databases.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/backups.php" -o "$TEMP_DIR/backups.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/header.php" -o "$TEMP_DIR/header.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/dns.php" -o "$TEMP_DIR/dns.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/dns_utils.php" -o "$TEMP_DIR/dns_utils.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/dns_servers.php" -o "$TEMP_DIR/dns_servers.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/auth.php" -o "$TEMP_DIR/auth.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/login.php" -o "$TEMP_DIR/login.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/download.php" -o "$TEMP_DIR/download.php" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/admin-style.css" -o "$TEMP_DIR/admin-style.css" || exit 1
+curl -fsSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template" || exit 1
+curl -fsSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php" || exit 1
+curl -fsSL "$REPO_RAW/src/engine/mod_lwh_guard.c" -o "$TEMP_DIR/mod_lwh_guard.c" || exit 1
+curl -fsSL "$REPO_RAW/src/engine/certbot_dns_auth.php" -o "$TEMP_DIR/certbot_dns_auth.php" || exit 1
+curl -fsSL "$REPO_RAW/src/engine/certbot_dns_cleanup.php" -o "$TEMP_DIR/certbot_dns_cleanup.php" || exit 1
+curl -fsSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template" || exit 1
+curl -fsSL "$REPO_RAW/src/engine/sync_monitor.sh" -o "$TEMP_DIR/sync_monitor.sh" || exit 1
+curl -fsSL "$REPO_RAW/src/engine/auto_backup.php" -o "$TEMP_DIR/auto_backup.php" || exit 1
+curl -fsSL "$REPO_RAW/autoupdate.sh" -o "$TEMP_DIR/autoupdate.sh" || exit 1
+curl -fsSL "$REPO_RAW/installadmin.sh" -o "$TEMP_DIR/installadmin.sh" || exit 1
 
 if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks.php" ] || [ ! -f "$TEMP_DIR/tasks_status.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
     printf "${RED}Error: No se pudieron descargar los archivos esenciales desde GitHub.${NC}\n"
@@ -485,6 +496,13 @@ if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/tasks.php" ] || [ ! -f "$
 fi
 
 # Mover archivos a su destino final
+for staged_php in "$TEMP_DIR"/*.php; do php -l "$staged_php" >/dev/null || exit 1; done
+# A small fixups hook blocks distributed proxy rules from reaching another
+# site's FPM pool. It preserves live .htaccess and has no extra daemon.
+apt install -y apache2-dev >/dev/null || exit 1
+(cd "$TEMP_DIR" && apxs -c mod_lwh_guard.c && apxs -i mod_lwh_guard.la) >/dev/null 2>&1 || exit 1
+printf '%s\n' 'LoadModule lwh_guard_module /usr/lib/apache2/modules/mod_lwh_guard.so' > /etc/apache2/mods-available/lwh_guard.load
+a2enmod lwh_guard >/dev/null || exit 1
 cp "$TEMP_DIR/index.php" "$ADMIN_PATH/index.php"
 cp "$TEMP_DIR/tasks.php" "$ADMIN_PATH/tasks.php"
 cp "$TEMP_DIR/tasks_status.php" "$ADMIN_PATH/tasks_status.php"
@@ -549,12 +567,14 @@ else
     [ "$CURRENT_MANAGER" = "dbadmin" ] && rm -rf "$ADMIN_PATH/dbadmin"
 fi
 
-# Conservar DISABLE_LOGIN si existe (guardar antes de sobreescribir config.php)
+# Authentication is enabled after an install/update; credentials are preserved.
 PREVIOUS_DL="false"
-if [ -f "$EXISTING_CONFIG" ] && grep -q "DISABLE_LOGIN" "$EXISTING_CONFIG"; then
-    PREVIOUS_DL=$(grep "DISABLE_LOGIN" "$EXISTING_CONFIG" | cut -d"," -f2 | cut -d")" -f1 | tr -d "[:space:]'")
-fi
 
+if [ "$AUTO_UPDATE" = true ] && [ -n "$EXISTING_ADMIN_HASH" ]; then
+    ADMIN_PASS_HASH="$EXISTING_ADMIN_HASH"
+else
+    ADMIN_PASS_HASH=$(LWH_PASSWORD="$ADMIN_PASS" php -r 'echo password_hash(getenv("LWH_PASSWORD"), PASSWORD_DEFAULT);') || exit 1
+fi
 cat <<EOF > $ADMIN_PATH/config.php
 <?php
 define('DB_HOST', '127.0.0.1');
@@ -563,7 +583,7 @@ define('DB_USER', 'dbadmin');
 define('DB_PASS', '$DB_ADMIN_PASS');
 define('ADMIN_EMAIL', '$ADMIN_EMAIL');
 define('ADMIN_USER', '$ADMIN_USER');
-define('ADMIN_PASS', '$ADMIN_PASS');
+define('ADMIN_PASS_HASH', '$ADMIN_PASS_HASH');
 define('DNS_HOSTNAME', '$DNS_HOSTNAME');
 define('DNS_DOMAIN', '$DNS_DOMAIN');
 define('DNS_ADMIN_EMAIL', '$DNS_ADMIN_EMAIL');
@@ -602,15 +622,18 @@ function getPDO() {
 ?>
 EOF
 
-chown -R www-data:www-data $ADMIN_PATH
-chmod -R 755 $ADMIN_PATH
+chown -R root:www-data "$ADMIN_PATH"
+find "$ADMIN_PATH" -type d -exec chmod 0750 {} +
+find "$ADMIN_PATH" -type f -exec chmod 0640 {} +
+install -d -o www-data -g www-data -m 0700 /var/lib/lightweight-hosting/exports /var/lib/lightweight-hosting/login
+
 
 # Instalación del gestor de base de datos
 if [ "$DB_MANAGER_DIR" = "phpmyadmin" ]; then
     printf "${YELLOW}Instalando phpMyAdmin (vía descarga directa)...${NC}\n"
     PMA_VER="5.2.1"
     PMA_URL="https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER}/phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
-    curl -sSL "$PMA_URL" -o /tmp/pma.tar.gz
+    curl -fsSL "$PMA_URL" -o /tmp/pma.tar.gz || exit 1
     mkdir -p "$ADMIN_PATH/phpmyadmin"
     tar -xzf /tmp/pma.tar.gz -C "$ADMIN_PATH/phpmyadmin" --strip-components=1
     rm /tmp/pma.tar.gz
@@ -627,12 +650,14 @@ if [ "$DB_MANAGER_DIR" = "phpmyadmin" ]; then
 \$cfg['Servers'][\$i]['AllowNoPassword'] = false;
 ?>
 EOF
-    chown -R www-data:www-data "$ADMIN_PATH/phpmyadmin"
+    chown -R root:www-data "$ADMIN_PATH/phpmyadmin"
+    chmod -R g+rX,o-rwx "$ADMIN_PATH/phpmyadmin"
 else
     printf "${YELLOW}Instalando Adminer...${NC}\n"
     mkdir -p "$ADMIN_PATH/dbadmin"
-    curl -L https://www.adminer.org/latest.php -o "$ADMIN_PATH/dbadmin/index.php"
-    chown -R www-data:www-data "$ADMIN_PATH/dbadmin"
+    curl -L https://www.adminer.org/latest.php -o "$ADMIN_PATH/dbadmin/index.php" || exit 1
+    chown -R root:www-data "$ADMIN_PATH/dbadmin"
+    chmod -R g+rX,o-rwx "$ADMIN_PATH/dbadmin"
 fi
 
 # Crear VirtualHost para el puerto 8080 (Admin + PHPMyAdmin)
@@ -724,6 +749,16 @@ cat <<EOF > /etc/apache2/sites-available/000-admin.conf
     </Directory>
 </VirtualHost>
 EOF
+
+cat > /etc/apache2/conf-available/hosting-private.conf <<'PRIVATE'
+<Directory /var/www/admin_panel/downloads>
+    Require all denied
+</Directory>
+<FilesMatch "^(config\.php(?:\.template)?|auth\.php)$">
+    Require all denied
+</FilesMatch>
+PRIVATE
+a2enconf hosting-private
 
 # Configuración global para el gestor de BD (accesible desde cualquier dominio/subdominio)
 cat <<EOF > /etc/apache2/conf-available/hosting-dbmanager.conf

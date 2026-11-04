@@ -1,6 +1,7 @@
 <?php
-session_start();
-require 'config.php';
+require_once __DIR__ . '/auth.php';
+checkAuth();
+checkCsrf();
 require_once 'dns_utils.php';
 $pdo = getPDO();
 
@@ -103,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $url = rtrim(trim($_POST['test_url'] ?? ''), '/');
         $token = trim($_POST['test_token'] ?? '');
 
-        if (!empty($url) && !empty($token)) {
+        if (parse_url($url, PHP_URL_SCHEME) === 'https' && !empty($token)) {
             $ch = curl_init($url . '/api-dns/zones');
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -111,7 +112,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "Accept: application/json"
             ]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 8);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
@@ -206,7 +208,7 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                     Filtrar la pantalla DNS por este servidor
                 </label>
                 <button type="submit" class="btn btn-primary">Guardar</button>
-            </form>
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
         </div>
 
         <!-- Formulario Añadir Servidor -->
@@ -239,7 +241,7 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                     <button type="button" onclick="document.getElementById('form-add-server').style.display='none'" class="btn btn-outline">Cancelar</button>
                     <button type="submit" class="btn btn-primary">Guardar Servidor</button>
                 </div>
-            </form>
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
             <div id="test-result-add" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 0.9rem;"></div>
         </div>
 
@@ -286,7 +288,7 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                                     <input type="hidden" name="server_id" value="<?php echo $s['id']; ?>">
                                     <input type="hidden" name="current_status" value="<?php echo $s['is_active']; ?>">
                                     <button type="submit" class="btn btn-outline btn-sm"><?php echo $s['is_active'] ? '⏸ Desactivar' : '▶ Activar'; ?></button>
-                                </form>
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                                 <!-- Edit -->
                                 <button type="button" class="btn btn-outline btn-sm" onclick="editServer(<?php echo htmlspecialchars(json_encode($s)); ?>)">✏️ Editar</button>
                                 <!-- Delete -->
@@ -294,7 +296,7 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="server_id" value="<?php echo $s['id']; ?>">
                                     <button type="submit" class="btn btn-danger btn-sm">🗑 Eliminar</button>
-                                </form>
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             </div>
                         </div>
                     </div>
@@ -332,7 +334,7 @@ $servers = $pdo->query("SELECT * FROM sys_dns_servers ORDER BY id ASC")->fetchAl
                     <button type="button" onclick="document.getElementById('modal-edit').style.display='none'" class="btn btn-outline">Cancelar</button>
                     <button type="submit" class="btn btn-primary">Guardar Cambios</button>
                 </div>
-            </form>
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
         </div>
     </div>
 

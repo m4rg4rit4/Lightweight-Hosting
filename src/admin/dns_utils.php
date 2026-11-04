@@ -341,6 +341,7 @@ function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = n
     if (empty($token)) return ['code' => 0, 'response' => '', 'error' => 'No token'];
 
     $baseUrl = (strpos($serverUrl, 'http') === 0) ? rtrim($serverUrl, '/') : "http://" . rtrim($serverUrl, '/');
+    if (parse_url($baseUrl, PHP_URL_SCHEME) !== 'https') return ['code' => 0, 'response' => '', 'error' => 'DNS requiere HTTPS con certificado válido'];
     $url = $baseUrl . $endpoint;
 
     $ch = curl_init($url);
@@ -355,7 +356,8 @@ function dnsApiRequestOnServer($serverUrl, $endpoint, $method = 'GET', $data = n
     }
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_TIMEOUT, 6);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $error = curl_error($ch);

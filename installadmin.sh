@@ -1,60 +1,7 @@
 #!/bin/bash
-# ==========================================================================
-# Hosting Custom - Bundle Installer/Updater
-# Handles decompression and distribution of Admin Panel and Task Engine
-# ==========================================================================
-
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# Configuración de URLs y Rutas
-REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main"
-ADMIN_PATH="/var/www/admin_panel"
-ENGINE_PATH="/usr/local/bin/hosting"
-
-printf "${YELLOW}Actualizando archivos desde GitHub...${NC}\n"
-
-# Crear directorio temporal para descargas
-TEMP_DIR=$(mktemp -d /tmp/hosting_update_XXXXXX)
-
-# 1. Descargar Panel de Administración y Motor a /tmp
-printf "${YELLOW}Descargando archivos desde GitHub a /tmp...${NC}\n"
-curl -sSL "$REPO_RAW/src/admin/index.php" -o "$TEMP_DIR/index.php"
-curl -sSL "$REPO_RAW/src/admin/config.php.template" -o "$TEMP_DIR/config.php.template"
-curl -sSL "$REPO_RAW/src/admin/download.php" -o "$TEMP_DIR/download.php"
-curl -sSL "$REPO_RAW/src/engine/server.php" -o "$TEMP_DIR/server.php"
-curl -sSL "$REPO_RAW/src/engine/index.html.template" -o "$TEMP_DIR/index.html.template"
-
-if [ ! -f "$TEMP_DIR/index.php" ] || [ ! -f "$TEMP_DIR/server.php" ]; then
-    printf "${RED}Error: No se pudieron descargar los archivos esenciales.${NC}\n"
-    rm -rf "$TEMP_DIR"
-    exit 1
-fi
-
-# 2. Desplegar archivos a su destino final
-printf "${YELLOW}Desplegando archivos...${NC}\n"
-mkdir -p "$ADMIN_PATH" "$ENGINE_PATH"
-cp "$TEMP_DIR/index.php" "$ADMIN_PATH/index.php"
-cp "$TEMP_DIR/config.php.template" "$ADMIN_PATH/config.php.template"
-cp "$TEMP_DIR/download.php" "$ADMIN_PATH/download.php"
-cp "$TEMP_DIR/server.php" "$ENGINE_PATH/server.php"
-cp "$TEMP_DIR/index.html.template" "$ENGINE_PATH/index.html.template"
-
-# Ajustar permisos de propiedad y ejecución
-chown -R www-data:www-data $ADMIN_PATH
-chmod -R 755 $ADMIN_PATH
-
-# El motor de tareas debe ser ejecutable y privado para root
-if [ -f "$ENGINE_PATH/server.php" ]; then
-    chmod 700 $ENGINE_PATH/server.php
-    chown root:root $ENGINE_PATH/server.php
-fi
-
-# Limpieza final
-rm -rf "$TEMP_DIR" /tmp/hosting.tar.gz
-
-printf "${GREEN}====================================================${NC}\n"
-printf "${GREEN} Proceso de despliegue de archivos completado.${NC}\n"
-printf "${GREEN}====================================================${NC}\n"
+set -eu
+TEMP_INSTALL=$(mktemp /tmp/lwh-update-XXXXXXXX)
+trap 'rm -f "$TEMP_INSTALL"' EXIT
+curl -fsSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/install.sh -o "$TEMP_INSTALL"
+bash -n "$TEMP_INSTALL"
+bash "$TEMP_INSTALL" /update /silent

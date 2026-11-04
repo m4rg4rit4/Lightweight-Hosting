@@ -2,6 +2,21 @@
 require_once __DIR__ . '/auth.php';
 checkAuth();
 ?>
+<script>
+(() => {
+    const token = <?= json_encode(csrfToken()) ?>;
+    const originalFetch = window.fetch;
+    window.fetch = (input, options = {}) => {
+        const url = new URL(input instanceof Request ? input.url : input, location.href);
+        if (url.origin === location.origin) {
+            const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+            headers.set('X-CSRF-Token', token);
+            options = {...options, headers};
+        }
+        return originalFetch(input, options);
+    };
+})();
+</script>
 <link rel="stylesheet" href="admin-style.css">
 <nav>
     <div style="display: flex; flex-direction: column; gap: 2px;">
@@ -16,7 +31,7 @@ checkAuth();
             <button type="submit" class="btn-update-system">
                 🔄 Actualizar
             </button>
-        </form>
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
     </div>
     <?php
     $current_page = basename($_SERVER['PHP_SELF']);

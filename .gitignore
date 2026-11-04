@@ -18,3 +18,34 @@ Thumbs.db
 
 # Dependencias de PHP (si se usara composer en el futuro)
 vendor/
+temp/
+
+# Private operations and generated artifacts
+.agents/
+.codex/
+.env.*
+!.env.example
+scratch/
+_local_archive/
+__pycache__/
+*.py[cod]
+*.exe
+*.exe~
+*.pem
+*.key
+*.p12
+*.pfx
+*.sql
+*.sql.gz
+*.tar.gz
+*.zip
+*.bak
+*.old
+*.tmp
+*.index
+deploy-*.json
+*-audit.json
+upload.py
+deploy_*.py
+host[0-9]*.py
+host[0-9]*.sh

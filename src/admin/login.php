@@ -6,9 +6,7 @@
  * Si se modifica uno, debe actualizarse el otro para mantener la compatibilidad.
  */
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/auth.php';
 
 $configFile = __DIR__ . '/config.php';
 if (!file_exists($configFile)) {
@@ -18,15 +16,36 @@ require_once $configFile;
 
 $redirect = $_GET['redirect'] ?? $_POST['redirect'] ?? 'index.php';
 
+if (!is_string($redirect) || !preg_match('/^[a-z_]+\.php$/D', $redirect)) $redirect = 'index.php';
+function loginRateState($increment = false) {
+    $dir = defined('LOGIN_RATE_DIR') ? LOGIN_RATE_DIR : '/var/lib/lightweight-hosting/login';
+    if (!is_dir($dir) && !@mkdir($dir, 0700) && !is_dir($dir)) return 10;
+    $file = $dir . '/' . hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    $fp = @fopen($file, 'c+');
+    if (!$fp || !flock($fp, LOCK_EX)) return 10;
+    $state = json_decode(stream_get_contents($fp), true) ?: ['start' => time(), 'count' => 0];
+    if (time() - $state['start'] >= 900) $state = ['start' => time(), 'count' => 0];
+    if ($increment) $state['count']++;
+    ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode($state));
+    flock($fp, LOCK_UN); fclose($fp);
+    return $state['count'];
+}
+function loginAllowed() { return loginRateState() < 10; }
+function recordLoginFailure() { loginRateState(true); }
 $error = '';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    checkCsrf();
     $user = $_POST['user'] ?? '';
     $pass = $_POST['pass'] ?? '';
 
     // Validar constantes (asegurar que existen)
-    if (!defined('ADMIN_USER') || !defined('ADMIN_PASS')) {
+    if (!defined('ADMIN_USER') || (!defined('ADMIN_PASS_HASH') && !defined('ADMIN_PASS'))) {
         $error = "Configuración de seguridad incompleta en config.php.";
-    } elseif ($user === ADMIN_USER && $pass === ADMIN_PASS) {
+    } elseif (loginAllowed() && is_string($user) && is_string($pass) && hash_equals(ADMIN_USER, $user) &&
+        (defined('ADMIN_PASS_HASH') ? password_verify($pass, ADMIN_PASS_HASH) : hash_equals(ADMIN_PASS, $pass))) {
+        session_regenerate_id(true);
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         $_SESSION['lwh_logged_in'] = true;
         $_SESSION['lwh_user'] = $user;
         
@@ -34,7 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header("Location: " . $redirect);
         exit;
     } else {
-        $error = "Usuario o contraseña incorrectos.";
+        recordLoginFailure();
+        $error = "Usuario o contraseña incorrectos, o demasiados intentos. Espera unos minutos.";
     }
 }
 ?>
@@ -159,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="password" id="pass" name="pass" class="form-control" placeholder="••••••••" autocomplete="current-password" required>
         </div>
         <button type="submit" class="btn btn-primary w-100">Iniciar Sesión</button>
-    </form>
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
     
     <div class="mt-4 text-center">
         <p class="text-secondary small">Panel de Administración</p>

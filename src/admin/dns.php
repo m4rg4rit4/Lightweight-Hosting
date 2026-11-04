@@ -1,6 +1,7 @@
 <?php
-session_start();
-require 'config.php';
+require_once __DIR__ . '/auth.php';
+checkAuth();
+checkCsrf();
 require_once 'dns_utils.php';
 
 // Verificación: se necesita al menos un servidor DNS configurado
@@ -654,7 +655,7 @@ if ($activeDomain && isset($_GET['export'])) {
                      <input type="hidden" name="scope" value="<?php echo $activeDomain ? 'domain' : 'all'; ?>">
                      <input type="hidden" name="domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
                      <button type="submit" class="btn btn-warning" style="background: #f59e0b; color: white; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 15px rgba(245, 158, 11, 0.3)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(245, 158, 11, 0.2)'">Sincronizar ahora</button>
-                 </form>
+                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
              </div>
         <?php endif; ?>
 
@@ -697,7 +698,7 @@ if ($activeDomain && isset($_GET['export'])) {
                             <button type="submit" class="btn btn-outline" style="width: 100%; padding: 6px; font-size: 0.75rem;" title="Asigna a este servidor las zonas sin dueño que coincidan exactamente con un sitio local. Lo ambiguo se deja sin asignar.">
                                 📌 Reclamar mis zonas (<?php echo $unassignedCount; ?> sin asignar)
                             </button>
-                        </form>
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                     <?php endif; ?>
                 </div>
                 <?php endif; ?>
@@ -765,7 +766,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                             <input type="hidden" name="new_domain" value="<?php echo htmlspecialchars($activeDomain); ?>">
                                             <input type="hidden" name="target_ip" value="">
                                             <button type="submit" class="btn btn-primary btn-sm" style="margin-left: 10px;">⚡ Alta en Servidor DNS</button>
-                                        </form>
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                                     <?php endif; ?>
                                 </div>
                                 <p style="color: var(--text-dim); margin: 8px 0 0 0;">Gestión jerárquica de subdominios y servicios asociados.</p>
@@ -823,7 +824,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                 <?php if (!$assignment['consistent'] && $canAssign): ?>
                                     <button name="assignment_intent" value="reconcile" class="btn btn-outline">Confirmar asignación en ambos DNS</button>
                                 <?php endif; ?>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <?php if (!$assignment['primary']['ok']): ?><p>No se puede cambiar la asignación mientras el DNS principal no responda.</p><?php endif; ?>
                         </div>
                         <?php endif; ?>
@@ -921,7 +922,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
                                     <button type="submit" name="save_soa" class="btn btn-primary">Aplicar Configuración SOA</button>
                                 </div>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                         </div>
 
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
@@ -997,7 +998,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                     <button type="button" onclick="document.getElementById('row-add-record').style.display='none'" class="btn btn-outline" style="min-width: 100px;">Cancelar</button>
                                     <button type="submit" class="btn btn-primary" style="min-width: 150px;">Guardar Registro</button>
                                 </div>
-                            </form>
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                         </div>
 
                         <div style="overflow-x: auto;">
@@ -1033,7 +1034,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                                             <input type="hidden" name="record_id" value="<?php echo $r['id']; ?>">
                                                             <input type="hidden" name="direction" value="up">
                                                             <button type="submit" class="btn btn-outline" style="padding: 6px; border-radius: 6px;" title="Subir">↑</button>
-                                                        </form>
+                                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                                                         <?php endif; ?>
                                                         <?php if ($index < count($records) - 1): ?>
                                                         <form method="POST" style="margin:0;">
@@ -1041,7 +1042,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                                             <input type="hidden" name="record_id" value="<?php echo $r['id']; ?>">
                                                             <input type="hidden" name="direction" value="down">
                                                             <button type="submit" class="btn btn-outline" style="padding: 6px; border-radius: 6px;" title="Bajar">↓</button>
-                                                        </form>
+                                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                                                         <?php endif; ?>
                                                         <button type="button" class="btn btn-outline" style="padding: 6px; border-radius: 6px;" title="Editar Registro" 
                                                             onclick="editRecord(<?php echo htmlspecialchars(json_encode($r)); ?>)">
@@ -1057,7 +1058,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                                             <button type="submit" class="btn btn-danger" style="padding: 6px; border-radius: 6px;" title="Eliminar Registro">
                                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                                             </button>
-                                                        </form>
+                                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                                                     </div>
                                                  </td>
                                             </tr>
@@ -1116,7 +1117,7 @@ if ($activeDomain && isset($_GET['export'])) {
                                     </label>
                                     <input type="text" name="confirm_domain" autocomplete="off" placeholder="<?php echo htmlspecialchars($activeDomain); ?>" style="width: 260px;">
                                     <button type="submit" class="btn btn-danger">Eliminar definitivamente</button>
-                                </form>
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -1149,7 +1150,7 @@ if ($activeDomain && isset($_GET['export'])) {
                     <button type="button" onclick="document.getElementById('modal-add').style.display='none'" class="btn btn-outline" style="min-width: 100px;">Cancelar</button>
                     <button type="submit" class="btn btn-primary" style="min-width: 150px;">Crear Nueva Zona</button>
                 </div>
-            </form>
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES) ?>"></form>
         </div>
     </div>
 

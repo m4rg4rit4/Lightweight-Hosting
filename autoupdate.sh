@@ -18,7 +18,7 @@ else
 fi
 
 # Obtener version remota desde GitHub
-REMOTE_VERSION=$(curl -sSL "$REPO_RAW/VERSION" | tr -d '[:space:]')
+REMOTE_VERSION=$(curl -fsSL "$REPO_RAW/VERSION" | tr -d '[:space:]')
 
 if [ -z "$REMOTE_VERSION" ]; then
     echo -e "${RED}Error: No se pudo obtener la versión remota.${NC}"
@@ -33,11 +33,12 @@ echo -e "Versión remota: ${GREEN}$REMOTE_VERSION${NC}"
 if [ "$LOCAL_VERSION" != "$REMOTE_VERSION" ]; then
     echo -e "${YELLOW}¡Nueva versión detectada! Iniciando actualización...${NC}"
     
-    TEMP_INSTALL="/tmp/install_hosting_update.sh"
-    curl -sSL "$REPO_RAW/install.sh" -o "$TEMP_INSTALL"
+    TEMP_INSTALL=$(mktemp /tmp/lwh-update-XXXXXXXX) || exit 1
+    trap 'rm -f "$TEMP_INSTALL"' EXIT
+    curl -fsSL "$REPO_RAW/install.sh" -o "$TEMP_INSTALL" || exit 1
     
     if [ -f "$TEMP_INSTALL" ]; then
-        bash "$TEMP_INSTALL" /update
+        bash -n "$TEMP_INSTALL" && bash "$TEMP_INSTALL" /update /silent || exit 1
         echo -e "${GREEN}Actualización completada a la versión $REMOTE_VERSION.${NC}"
     else
         echo -e "${RED}Error al descargar el instalador.${NC}"

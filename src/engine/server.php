@@ -4,6 +4,12 @@
  * Runs as root via cron
  */
 
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit; }
+if (!is_dir('/run/lightweight-hosting')) mkdir('/run/lightweight-hosting', 0700);
+$engineLock = fopen('/run/lightweight-hosting/engine.lock', 'c');
+if (!$engineLock || !flock($engineLock, LOCK_EX | LOCK_NB)) exit;
+// The lock is held until process exit, including long backups and updates.
+
 // --- Configuración de Comandos ---
 $cmd_a2ensite = "/usr/sbin/a2ensite";
 $cmd_a2dissite = "/usr/sbin/a2dissite";
@@ -54,6 +60,25 @@ try {
 }
 
 // --- Funciones Auxiliares ---
+function privateWorkdir() {
+    $path = sys_get_temp_dir() . '/lwh-' . bin2hex(random_bytes(16));
+    if (!mkdir($path, 0700)) throw new RuntimeException('No se pudo crear el directorio temporal.');
+    return $path;
+}
+function checkedCommand($command) {
+    $output = []; $code = 0;
+    exec($command . ' 2>&1', $output, $code);
+    if ($code !== 0) throw new RuntimeException('Comando fallido (código ' . $code . ').');
+    return $output;
+}
+function dumpDatabase($dumpBin, $auth, $dbName, $destination) {
+    $sql = $destination . '.sql';
+    try {
+        checkedCommand($dumpBin . ' ' . $auth . ' --single-transaction --routines --events --triggers ' . escapeshellarg($dbName) . ' > ' . escapeshellarg($sql));
+        checkedCommand('gzip -c -- ' . escapeshellarg($sql) . ' > ' . escapeshellarg($destination));
+    } finally { @unlink($sql); }
+}
+
 
 function getPublicIP() {
     $ip = shell_exec("/usr/bin/curl -s https://api.ipify.org");
@@ -67,14 +92,105 @@ function checkExternalDNS($domain, $expectedIP) {
     return in_array($expectedIP, $ips);
 }
 
+/**
+ * Nombres (SAN) que cubre realmente el certificado vivo de un dominio.
+ * Devuelve [] si no hay certificado. Sirve para detectar certificados emitidos
+ * "cojos" (p.ej. sin www) y poder ampliarlos despues.
+ */
+function getCertNames($domain) {
+    $file = "/etc/letsencrypt/live/$domain/cert.pem";
+    if (!file_exists($file)) return [];
+    $out = shell_exec("/usr/bin/openssl x509 -in " . escapeshellarg($file) . " -noout -text 2>/dev/null");
+    if (!$out || !preg_match_all('/DNS:([^\s,]+)/i', $out, $m)) return [];
+    return array_map('strtolower', $m[1]);
+}
+
+/**
+ * De los subdominios que el panel siempre sirve (www, pma, phpmyadmin), cuales
+ * apuntan ya a nuestra IP pero NO estan en el certificado. Si el certificado es
+ * wildcard no falta ninguno.
+ */
+function getMissingCertNames($domain, $publicIP) {
+    $certNames = getCertNames($domain);
+    if (empty($certNames)) return [];
+    if (in_array("*.$domain", $certNames)) return [];
+
+    $missing = [];
+    foreach (['www', 'pma', 'phpmyadmin'] as $sub) {
+        $fqdn = "$sub.$domain";
+        if (in_array($fqdn, $certNames)) continue;
+        if (checkExternalDNS($fqdn, $publicIP)) $missing[] = $fqdn;
+    }
+    return $missing;
+}
+
+function siteUser($domain) { return 'lwh_' . substr(hash('sha256', $domain), 0, 16); }
+function normalizeHtaccessOptions($contents) {
+    return preg_replace_callback('/^([ \t]*Options[ \t]+)([^\r\n]*)/mi', function ($match) {
+        $tokens = preg_split('/([ \t]+)/', $match[2], -1, PREG_SPLIT_DELIM_CAPTURE);
+        foreach ($tokens as &$token) {
+            if (strcasecmp($token, '+FollowSymLinks') === 0) $token = '+SymLinksIfOwnerMatch';
+            elseif (strcasecmp($token, 'FollowSymLinks') === 0) $token = 'SymLinksIfOwnerMatch';
+        }
+        return $match[1] . implode('', $tokens);
+    }, $contents);
+}
+function migrateHtaccessOptions($path, $user) {
+    $backupDir = '/var/lib/lightweight-hosting/htaccess-migration/' . $user;
+    $entries = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS));
+    foreach ($entries as $entry) {
+        if ($entry->getFilename() !== '.htaccess' || $entry->isLink() || !$entry->isFile()) continue;
+        $file = $entry->getPathname();
+        $contents = file_get_contents($file);
+        if ($contents === false) throw new RuntimeException('No se pudo leer .htaccess.');
+        $updated = normalizeHtaccessOptions($contents);
+        if ($updated === $contents) continue;
+        if (!is_dir($backupDir) && !mkdir($backupDir, 0700, true)) throw new RuntimeException('No se pudo guardar la configuración anterior.');
+        $backup = $backupDir . '/' . hash('sha256', $file) . '.htaccess';
+        if (!file_exists($backup) && !copy($file, $backup)) throw new RuntimeException('No se pudo guardar .htaccess.');
+        chmod($backup, 0600);
+        if (file_put_contents($file, $updated) === false) throw new RuntimeException('No se pudo adaptar .htaccess.');
+    }
+}
+function isolateSite($domain, $path, $phpVersion) {
+    global $isolationBatch;
+    if (strlen($domain) > 253 || !preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/D', $domain)) throw new RuntimeException('Dominio inválido.');
+    if ($path !== '/var/www/html' && $path !== '/var/www/vhosts/' . $domain) throw new RuntimeException('Raíz del sitio fuera de la ubicación permitida.');
+    $user = siteUser($domain);
+    umask(0007);
+    if (!posix_getpwnam($user)) checkedCommand('/usr/sbin/useradd --system --user-group --no-create-home --shell /usr/sbin/nologin ' . escapeshellarg($user));
+    // Panel and Apache can access sites; site users cannot access each other or the panel.
+    checkedCommand('/usr/sbin/usermod -a -G ' . escapeshellarg($user) . ' www-data');
+    if (is_link($path)) throw new RuntimeException('La raíz del sitio no puede ser un enlace.');
+    if (is_dir($path)) {
+        migrateHtaccessOptions($path, $user);
+        checkedCommand('chown -R -h -- ' . escapeshellarg($user . ':' . $user) . ' ' . escapeshellarg($path));
+        checkedCommand('find ' . escapeshellarg($path) . ' -type d -exec chmod 2770 {} +');
+        checkedCommand('find ' . escapeshellarg($path) . ' -type f -exec chmod 0660 {} +');
+    }
+    $pool = "[$user]\nuser = $user\ngroup = $user\nlisten = /run/php/$user.sock\nlisten.owner = www-data\nlisten.group = www-data\nlisten.mode = 0600\npm = ondemand\npm.max_children = 2\npm.process_idle_timeout = 10s\npm.max_requests = 300\nphp_admin_value[memory_limit] = 128M\nphp_admin_value[session.save_path] = /var/lib/php/$user\n";
+    if (!is_dir('/var/lib/php/' . $user)) mkdir('/var/lib/php/' . $user, 0700, true);
+    chown('/var/lib/php/' . $user, $user);
+    file_put_contents("/etc/php/$phpVersion/fpm/pool.d/$user.conf", $pool);
+    checkedCommand('/usr/sbin/php-fpm' . $phpVersion . ' -t');
+    if (empty($isolationBatch)) {
+        checkedCommand('/usr/bin/systemctl restart php' . $phpVersion . '-fpm');
+        checkedCommand('/usr/bin/systemctl restart apache2');
+    }
+}
 function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = false) {
     global $php_socket, $pdo;
+    $siteSocket = "/run/php/" . siteUser($domain) . ".sock";
+    $identity = siteUser($domain);
+    if (!file_exists("/etc/php/$php_v/fpm/pool.d/$identity.conf")) isolateSite($domain, $document_root, $php_v);
     $port = $is_ssl ? 443 : 80;
     $vhost = "<VirtualHost *:$port>\n";
     $vhost .= "    ServerName $domain\n";
     $vhost .= "    ServerAlias www.$domain pma.$domain phpmyadmin.$domain\n";
     $vhost .= "    DocumentRoot $document_root\n";
     $vhost .= "    DirectoryIndex index.php index.html\n";
+    $vhost .= "    LwhGuardSiteHandler \"proxy:unix:$siteSocket|fcgi://localhost/\"\n";
+    $vhost .= "    LwhGuardPanelHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
     $vhost .= "    ErrorLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_error.log\n";
     $vhost .= "    CustomLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_access.log combined\n\n";
     
@@ -84,10 +200,25 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     $vhost .= "    RewriteRule ^/(.*)$ /phpmyadmin/$1 [L,PT]\n\n";
 
     $vhost .= "    <Directory $document_root>\n";
-    $vhost .= "        Options -Indexes +FollowSymLinks\n";
-    $vhost .= "        AllowOverride All\n";
+    $vhost .= "        Options -Indexes -FollowSymLinks +SymLinksIfOwnerMatch\n";
+    // Live .htaccess support, as in ISPConfig. Keep symlink/CGI options controlled
+    // by root while allowing rewrites, headers, authentication and cache rules.
+    $vhost .= "        AllowOverride All Options=Indexes,MultiViews,SymLinksIfOwnerMatch\n";
     $vhost .= "        Require all granted\n";
     $vhost .= "    </Directory>\n\n";
+    // Location sections merge after .htaccess: the PHP identity belongs to the
+    // vhost, while applications keep control of their URL and access rules.
+    if ($php_enabled) {
+        $vhost .= "    <Location />\n";
+        $vhost .= "        <If \"-f '%{REQUEST_FILENAME}' && %{REQUEST_FILENAME} =~ m#\\.php$#\">\n";
+        $vhost .= "            SetHandler \"proxy:unix:$siteSocket|fcgi://localhost/\"\n";
+        $vhost .= "        </If>\n        <Else>\n            SetHandler default-handler\n        </Else>\n";
+        $vhost .= "    </Location>\n";
+        $vhost .= "    <LocationMatch ^/(phpmyadmin|dbadmin)(/|$)>\n";
+        $vhost .= "        <If \"-f '%{REQUEST_FILENAME}' && %{REQUEST_FILENAME} =~ m#\\.php$#\">\n";
+        $vhost .= "            SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
+        $vhost .= "        </If>\n    </LocationMatch>\n";
+    }
     
     // DB Manager access (Global Alias)
     $db_manager = defined('DB_MANAGER_DIR') ? DB_MANAGER_DIR : 'phpmyadmin';
@@ -107,8 +238,9 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     }
     
     if ($php_enabled) {
+        $php_socket_site = $siteSocket;
         $vhost .= "    <FilesMatch \.php$>\n";
-        $vhost .= "        SetHandler \"proxy:unix:$php_socket|fcgi://localhost/\"\n";
+        $vhost .= "        SetHandler \"proxy:unix:$php_socket_site|fcgi://localhost/\"\n";
         $vhost .= "    </FilesMatch>\n";
         
         try {
@@ -221,6 +353,20 @@ try {
     // Silencioso si falla por permisos en una ejecución normal, aunque el motor corre como root
 }
 
+// Migrate existing sites once. Keep the marker absent until every site succeeds.
+if (!$pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'migration_site_isolation_v1'")->fetchColumn()) {
+    $isolationBatch = true;
+    foreach ($pdo->query('SELECT domain, document_root FROM sys_sites')->fetchAll() as $existingSite) {
+        isolateSite($existingSite['domain'], $existingSite['document_root'], $php_v);
+        $pdo->prepare("INSERT INTO sys_tasks (task_type, payload) VALUES ('SITE_UPDATE_PHP_SETTINGS', ?)")->execute([json_encode(['domain' => $existingSite['domain']])]);
+    }
+    $isolationBatch = false;
+    checkedCommand('/usr/bin/systemctl restart php' . $php_v . '-fpm');
+    checkedCommand('/usr/bin/systemctl restart apache2');
+    $pdo->exec("INSERT INTO sys_settings (setting_key, setting_value) VALUES ('migration_site_isolation_v1', '1')");
+}
+// A previous process died while working. Never replay destructive work automatically.
+$pdo->exec("UPDATE sys_tasks SET status = 'error', result_msg = 'Motor interrumpido. Revisar el resultado antes de reintentar.' WHERE status = 'running'");
 // 1. Buscar tareas pendientes
 $stmt = $pdo->prepare("SELECT * FROM sys_tasks WHERE status = 'pending' ORDER BY created_at ASC");
 $stmt->execute();
@@ -229,20 +375,24 @@ $tasks = $stmt->fetchAll();
 foreach ($tasks as $task) {
     $taskId = $task['id'];
     $payload = json_decode($task['payload'], true);
-    $domain = $payload['domain'];
+    $domain = $payload['domain'] ?? '';
     $success = false;
     $msg = '';
 
     // Marcar como en ejecución (excepto si queremos reintentar silenciosamente)
-    $pdo->prepare("UPDATE sys_tasks SET status = 'running' WHERE id = ?")->execute([$taskId]);
+    $claim = $pdo->prepare("UPDATE sys_tasks SET status = 'running' WHERE id = ? AND status = 'pending'");
+    $claim->execute([$taskId]);
+    if ($claim->rowCount() !== 1) continue;
 
+    $tmpDir = null; $tmpTar = null;
+    try {
     switch ($task['task_type']) {
         case 'SITE_CREATE':
             $path = $payload['path'];
             $php = $payload['php_enabled'];
             if (!is_dir($path)) {
                 mkdir($path, 0755, true);
-                shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($path));
+                isolateSite($domain, $path, $php_v);
             }
 
             // Copiar index.html inicial si el directorio está vacío (o si es el root principal /var/www/html)
@@ -262,7 +412,9 @@ foreach ($tasks as $task) {
                 
                 if (!file_exists($indexPath) && !file_exists($indexPhpPath)) {
                     copy($templatePath, $indexPath);
-                    shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($indexPath));
+                    chown($indexPath, siteUser($domain));
+                    chgrp($indexPath, siteUser($domain));
+                    chmod($indexPath, 0660);
                 }
             }
             file_put_contents("/etc/apache2/sites-available/$domain.conf", generateVhost($domain, $path, $php, $php_v));
@@ -295,9 +447,13 @@ foreach ($tasks as $task) {
             $dnsManaged = hasDnsServers();
             
             if ($dnsManaged || ($publicIP && checkExternalDNS($domain, $publicIP))) {
-                // Verificar si ya hay una tarea SSL pendiente para este dominio para no duplicar
-                $stmtSSL = $pdo->prepare("SELECT id FROM sys_tasks WHERE task_type = 'SSL_LETSENCRYPT' AND payload LIKE ? AND status = 'pending'");
-                $stmtSSL->execute(['%"domain": "' . $domain . '"%']);
+                // Verificar si ya hay una tarea SSL pendiente para este dominio para no duplicar.
+                // Antes se comparaba con LIKE '%"domain": "..."%', con un espacio tras los
+                // dos puntos. MariaDB guarda el JSON tal cual se inserto y json_encode no
+                // pone ese espacio, asi que el patron no casaba nunca y la comprobacion
+                // siempre daba "no hay tarea": cada SITE_CREATE encolaba un SSL de mas.
+                $stmtSSL = $pdo->prepare("SELECT id FROM sys_tasks WHERE task_type = 'SSL_LETSENCRYPT' AND status = 'pending' AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.domain')) = ?");
+                $stmtSSL->execute([$domain]);
                 if (!$stmtSSL->fetch()) {
                     $sslPayload = json_encode(['domain' => $domain]);
                     $pdo->prepare("INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SSL_LETSENCRYPT', ?, 'pending')")->execute([$sslPayload]);
@@ -332,6 +488,21 @@ foreach ($tasks as $task) {
                 continue 2; // Saltar al siguiente item del foreach
             }
 
+            // El A de www suele propagarse unos minutos despues del apex. Sin esta
+            // espera el certificado se emitia solo para el dominio desnudo y la tarea
+            // se cerraba con exito: nadie volvia a mirarlo nunca.
+            if (!$dnsWwwOk) {
+                $wwwWait = isset($payload['www_wait']) ? (int)$payload['www_wait'] : 0;
+                if ($wwwWait < 10) {
+                    $payload['www_wait'] = $wwwWait + 1;
+                    $waitMsg = "Esperando DNS de www.$domain (intento " . ($wwwWait + 1) . "/10)";
+                    $pdo->prepare("UPDATE sys_tasks SET status = 'pending', payload = ?, result_msg = ? WHERE id = ?")
+                        ->execute([json_encode($payload), $waitMsg, $taskId]);
+                    continue 2;
+                }
+                // Agotada la espera se emite igual: hay dominios que no tienen www a proposito.
+            }
+
             $email = defined('ADMIN_EMAIL') ? ADMIN_EMAIL : "admin@$domain";
             $domainsArg = "-d " . escapeshellarg($domain);
             
@@ -341,7 +512,12 @@ foreach ($tasks as $task) {
             if ($dnsPmaFullOk) $domainsArg .= " -d " . escapeshellarg("phpmyadmin.$domain");
             
             // Usamos --keep-until-expiring y --expand para que si hay nuevos dominios se añadan, y si no, no se renueve innecesariamente
-            $cmd = "$cmd_certbot --apache $domainsArg --non-interactive --agree-tos --email " . escapeshellarg($email) . " --keep-until-expiring --expand 2>&1";
+            // --cert-name fija el lineage a /etc/letsencrypt/live/$domain: sin el, un
+            // reintento con distinto juego de nombres puede crear "$domain-0001" y el
+            // resto del motor (que lee siempre live/$domain) se queda mirando el viejo.
+            $cmd = "$cmd_certbot --apache $domainsArg --cert-name " . escapeshellarg($domain) .
+                   " --non-interactive --agree-tos --email " . escapeshellarg($email) .
+                   " --keep-until-expiring --expand 2>&1";
             exec($cmd, $output, $resultCode);
 
             // Verificación robusta: aunque certbot de un código de salida extraño, 
@@ -776,10 +952,8 @@ foreach ($tasks as $task) {
             
             $timestamp = date('Ymd_His');
             $backupFile = "backup_{$domain}_{$timestamp}.tar.gz";
-            $tmpDir = "/tmp/backup_{$domain}_{$timestamp}";
-            $tmpTar = "/tmp/$backupFile";
-            
-            mkdir($tmpDir, 0755, true);
+            $tmpDir = privateWorkdir();
+            $tmpTar = $tmpDir . ".tar.gz";
             
             $config = [
                 'domain' => $domain,
@@ -800,7 +974,7 @@ foreach ($tasks as $task) {
                 foreach ($associatedDbs as $db) {
                     $dbNameArg = escapeshellarg($db['db_name']);
                     $safeFile = "{$db['db_name']}.sql.gz";
-                    shell_exec("$dumpBin $auth {$dbNameArg} | gzip > {$dbDir}/{$safeFile}");
+                    dumpDatabase($dumpBin, $auth, $db['db_name'], "$dbDir/$safeFile");
                     
                     $config['databases'][] = [
                         'db_name' => $db['db_name'],
@@ -813,22 +987,23 @@ foreach ($tasks as $task) {
             
             file_put_contents("$tmpDir/config.json", json_encode($config, JSON_PRETTY_PRINT));
             
-            // Simlink para ahorrar espacio durante el tar (dereference con -h)
-            symlink($docRoot, "$tmpDir/webroot");
+            // Preserve links without reading arbitrary targets as root.
+            checkedCommand('cp -a -- ' . escapeshellarg(rtrim($docRoot, '/') . '/.') . ' ' . escapeshellarg($tmpDir . '/webroot'));
             
             $itemsToTar = "config.json webroot";
             if (!empty($dbFiles)) {
                 $itemsToTar .= " databases/";
             }
             
-            $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " $itemsToTar";
-            shell_exec($tarCmd);
+            $tarCmd = "tar -czf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " $itemsToTar";
+            checkedCommand($tarCmd);
+            checkedCommand('tar -tzf ' . escapeshellarg($tmpTar) . ' > /dev/null');
             
             $megaPath = "/Backups/{$domain}";
             exec("/usr/bin/mega-mkdir -p " . escapeshellarg($megaPath) . " 2>&1");
             exec("/usr/bin/mega-put " . escapeshellarg($tmpTar) . " " . escapeshellarg($megaPath) . " 2>&1", $outMega, $resMega);
             
-            if ($resMega === 0 || strpos(implode(" ", $outMega), 'uploaded') !== false) {
+            if ($resMega === 0) {
                 $pdo->prepare("INSERT INTO sys_backups (site_id, filename, mega_path, status) VALUES (?, ?, ?, 'completed')")
                     ->execute([$siteId, $backupFile, $megaPath]);
                 $msg = "Backup $backupFile uploaded completely (included " . count($associatedDbs) . " DBs).";
@@ -841,15 +1016,17 @@ foreach ($tasks as $task) {
             shell_exec("rm -rf " . escapeshellarg($tmpDir));
             @unlink($tmpTar);
             
-            // Retención
+            // Retención: never expire the last good copies after a failed upload.
+            if (!$success) break;
             $retentionVal = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'backup_retention_days'")->fetchColumn();
-            $retention = ($retentionVal !== false && $retentionVal !== null && is_numeric($retentionVal)) ? (int)$retentionVal : 7;
+            $retention = max(1, min(3650, is_numeric($retentionVal) ? (int)$retentionVal : 7));
 
             $oldBackups = $pdo->prepare("SELECT id, filename, mega_path FROM sys_backups WHERE site_id = ? AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
             $oldBackups->execute([$siteId, $retention]);
             foreach($oldBackups->fetchAll() as $old) {
                 $rmPath = escapeshellarg($old['mega_path'] . '/' . $old['filename']);
-                exec("/usr/bin/mega-rm $rmPath 2>&1");
+                exec("/usr/bin/mega-rm $rmPath 2>&1", $rmOutput, $rmCode);
+                if ($rmCode !== 0) continue;
                 $pdo->prepare("DELETE FROM sys_backups WHERE id = ?")->execute([$old['id']]);
             }
             break;
@@ -877,21 +1054,22 @@ foreach ($tasks as $task) {
                 break;
             }
             
+            $domain = $siteData['domain'];
             $docRoot = escapeshellarg($siteData['document_root']);
             $remoteFile = escapeshellarg($backupData['mega_path'] . '/' . $backupData['filename']);
-            $tmpTar = "/tmp/" . $backupData['filename'];
-            $tmpDir = "/tmp/restore_dir_" . uniqid();
+            if (basename($backupData['filename']) !== $backupData['filename']) throw new RuntimeException('Nombre de copia inválido.');
+            $tmpDir = privateWorkdir();
+            $tmpTar = $tmpDir . "/" . $backupData['filename'];
             
-            exec("/usr/bin/mega-get $remoteFile " . escapeshellarg("/tmp/") . " 2>&1", $outMega, $resMega);
+            exec("/usr/bin/mega-get $remoteFile " . escapeshellarg($tmpDir . "/") . " 2>&1", $outMega, $resMega);
             
-            if (!file_exists($tmpTar)) {
+            if ($resMega !== 0 || !file_exists($tmpTar)) {
                 $msg = "Failed to download backup from MEGA: " . implode(" ", $outMega);
                 $success = false;
                 break;
             }
             
-            mkdir($tmpDir, 0755, true);
-            shell_exec("tar -xzf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir));
+            checkedCommand('python3 -c ' . escapeshellarg('import sys,tarfile; t=tarfile.open(sys.argv[1]); t.extractall(sys.argv[2], filter="data")') . ' ' . escapeshellarg($tmpTar) . ' ' . escapeshellarg($tmpDir));
             
             $rootPass = trim(@file_get_contents("/root/.hosting_db_root"));
             $auth = $rootPass ? "-u root -p" . escapeshellarg($rootPass) : "-u root";
@@ -910,21 +1088,22 @@ foreach ($tasks as $task) {
                         $dbFile = "$tmpDir/databases/{$dbName}.sql.gz";
                         
                         if (file_exists($dbFile)) {
-                            $dbNameArg = escapeshellarg($dbName);
-                            $dbUserArg = escapeshellarg($dbUser);
-                            $dbPassArg = escapeshellarg($dbPass);
-                            
-                            // Asegurar que la DB y el Usuario existan
-                            shell_exec("mariadb $auth -e \"CREATE DATABASE IF NOT EXISTS $dbNameArg;\"");
-                            shell_exec("mariadb $auth -e \"CREATE USER IF NOT EXISTS '$dbUserArg'@'127.0.0.1' IDENTIFIED BY '$dbPassArg';\"");
-                            shell_exec("mariadb $auth -e \"GRANT ALL PRIVILEGES ON $dbNameArg.* TO '$dbUserArg'@'127.0.0.1';\"");
-                            shell_exec("mariadb $auth -e \"CREATE USER IF NOT EXISTS '$dbUserArg'@'localhost' IDENTIFIED BY '$dbPassArg';\"");
-                            shell_exec("mariadb $auth -e \"GRANT ALL PRIVILEGES ON $dbNameArg.* TO '$dbUserArg'@'localhost';\"");
-                            shell_exec("mariadb $auth -e \"FLUSH PRIVILEGES;\"");
-                            
-                            // Restaurar datos
-                            shell_exec("zcat " . escapeshellarg($dbFile) . " | mariadb $auth $dbNameArg");
-                            
+                            if (!preg_match('/^[a-zA-Z0-9_]{1,64}$/D', $dbName) || !preg_match('/^[a-zA-Z0-9_]{1,32}$/D', $dbUser)) throw new RuntimeException('Identificador de base de datos inválido.');
+                            $owner = $pdo->prepare('SELECT site_id FROM sys_databases WHERE db_name = ? OR db_user = ?');
+                            $owner->execute([$dbName, $dbUser]);
+                            foreach ($owner->fetchAll() as $row) if ((int)$row['site_id'] !== (int)$siteId) throw new RuntimeException('La base de datos pertenece a otro sitio.');
+                            $sqlPass = "'" . str_replace(["\\", "'"], ["\\\\", "''"], $dbPass) . "'";
+                            $sql = "CREATE DATABASE IF NOT EXISTS `$dbName`; ";
+                            foreach (['localhost', '127.0.0.1'] as $dbHost) {
+                                $sql .= "CREATE USER IF NOT EXISTS '$dbUser'@'$dbHost' IDENTIFIED BY $sqlPass; ";
+                                $sql .= "GRANT ALL PRIVILEGES ON `$dbName`.* TO '$dbUser'@'$dbHost'; ";
+                            }
+                            checkedCommand("mariadb $auth -e " . escapeshellarg($sql));
+                            $restoreSql = $tmpDir . '/restore.sql';
+                            checkedCommand('gzip -dc -- ' . escapeshellarg($dbFile) . ' > ' . escapeshellarg($restoreSql));
+                            checkedCommand("mariadb $auth " . escapeshellarg($dbName) . ' < ' . escapeshellarg($restoreSql));
+                            unlink($restoreSql);
+
                             // Asegurar que sys_databases esté sincronizado localmente
                             $stmtCheck = $pdo->prepare("SELECT id FROM sys_databases WHERE db_name = ?");
                             $stmtCheck->execute([$dbName]);
@@ -953,9 +1132,11 @@ foreach ($tasks as $task) {
             
             if (is_dir("$tmpDir/webroot")) {
                 // Remove existing files and copy new ones
-                shell_exec("sh -c 'rm -rf $docRoot/.[!.]* $docRoot/*'");
-                shell_exec("cp -a $tmpDir/webroot/. $docRoot/");
-                shell_exec("chown -R www-data:www-data $docRoot");
+                if ($siteData['document_root'] !== '/var/www/html' && $siteData['document_root'] !== '/var/www/vhosts/' . $domain) throw new RuntimeException('Raíz no permitida.');
+                if (is_link($siteData['document_root'])) throw new RuntimeException('La raíz no puede ser un enlace.');
+                checkedCommand("find $docRoot -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +");
+                checkedCommand("cp -a " . escapeshellarg("$tmpDir/webroot/.") . " $docRoot/");
+                isolateSite($domain, $siteData['document_root'], $php_v);
             }
             
             shell_exec("rm -rf " . escapeshellarg($tmpDir));
@@ -983,9 +1164,9 @@ foreach ($tasks as $task) {
             $docRoot = $siteData['document_root'];
             
             // 1. Crear directorio de descargas de forma segura si no existe
-            $downloadsDir = "/var/www/admin_panel/downloads";
+            $downloadsDir = "/var/lib/lightweight-hosting/exports";
             if (!is_dir($downloadsDir)) {
-                mkdir($downloadsDir, 0755, true);
+                mkdir($downloadsDir, 0700, true);
                 shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($downloadsDir));
             }
             
@@ -1004,10 +1185,8 @@ foreach ($tasks as $task) {
             
             $timestamp = date('Ymd_His');
             $exportFile = "export_{$domain}_{$token}.tar.gz";
-            $tmpDir = "/tmp/export_{$domain}_{$token}";
+            $tmpDir = privateWorkdir();
             $tmpTar = "$downloadsDir/$exportFile";
-            
-            mkdir($tmpDir, 0755, true);
             
             $dbFiles = [];
             if (!empty($associatedDbs)) {
@@ -1021,21 +1200,22 @@ foreach ($tasks as $task) {
                 foreach ($associatedDbs as $db) {
                     $dbNameArg = escapeshellarg($db['db_name']);
                     $safeFile = "{$db['db_name']}.sql.gz";
-                    shell_exec("$dumpBin $auth {$dbNameArg} | gzip > {$dbDir}/{$safeFile}");
+                    dumpDatabase($dumpBin, $auth, $db['db_name'], "$dbDir/$safeFile");
                     $dbFiles[] = "databases/{$safeFile}";
                 }
             }
             
-            // Simlink para ahorrar espacio durante el tar (dereference con -h)
-            symlink($docRoot, "$tmpDir/webroot");
+            // Preserve links without reading arbitrary targets as root.
+            checkedCommand('cp -a -- ' . escapeshellarg(rtrim($docRoot, '/') . '/.') . ' ' . escapeshellarg($tmpDir . '/webroot'));
             
             $itemsToTar = "webroot";
             if (!empty($dbFiles)) {
                 $itemsToTar .= " databases/";
             }
             
-            $tarCmd = "tar -czhf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " $itemsToTar";
-            shell_exec($tarCmd);
+            $tarCmd = "tar -czf " . escapeshellarg($tmpTar) . " -C " . escapeshellarg($tmpDir) . " $itemsToTar";
+            checkedCommand($tarCmd);
+            checkedCommand('tar -tzf ' . escapeshellarg($tmpTar) . ' > /dev/null');
             shell_exec("/usr/bin/chown www-data:www-data " . escapeshellarg($tmpTar));
             
             shell_exec("rm -rf " . escapeshellarg($tmpDir));
@@ -1051,11 +1231,11 @@ foreach ($tasks as $task) {
 
         case 'SYSTEM_UPDATE':
             $msg = 'Iniciando actualización del sistema desde GitHub...';
-            $tempInstall = "/tmp/install_hosting_update.sh";
+            $tempInstall = tempnam(sys_get_temp_dir(), "lwh-update-");
             $repoRaw = "https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main";
             
             // 1. Descargar el install.sh actualizado
-            $downloadCmd = "curl -sSL " . escapeshellarg("$repoRaw/install.sh") . " -o " . escapeshellarg($tempInstall);
+            $downloadCmd = "curl -fsSL " . escapeshellarg("$repoRaw/install.sh") . " -o " . escapeshellarg($tempInstall);
             exec($downloadCmd, $downloadOutput, $downloadCode);
             
             if ($downloadCode !== 0 || !file_exists($tempInstall)) {
@@ -1065,7 +1245,7 @@ foreach ($tasks as $task) {
             }
             
             // 2. Ejecutar la instalación / actualización de forma no interactiva, incluyendo apt-get update & upgrade
-            $updateCmd = "export DEBIAN_FRONTEND=noninteractive && bash " . escapeshellarg($tempInstall) . " /update /silent 2>&1";
+            $updateCmd = "export DEBIAN_FRONTEND=noninteractive LWH_ENGINE_UPDATE=1 && bash " . escapeshellarg($tempInstall) . " /update /silent 2>&1";
             exec($updateCmd, $updateOutput, $updateCode);
             $outStr = implode("\n", $updateOutput);
             
@@ -1086,6 +1266,13 @@ foreach ($tasks as $task) {
             break;
     }
 
+    } catch (Throwable $e) {
+        $success = false;
+        $msg = 'Error: ' . $e->getMessage();
+    } finally {
+        if ($tmpDir && is_dir($tmpDir)) exec('rm -rf -- ' . escapeshellarg($tmpDir));
+        if (!$success && $tmpTar && is_file($tmpTar)) unlink($tmpTar);
+    }
     $status = $success ? 'success' : 'error';
     $pdo->prepare("UPDATE sys_tasks SET status = ?, result_msg = ? WHERE id = ?")->execute([$status, $msg, $taskId]);
     echo "Task $taskId ($domain): $status - $msg\n";
@@ -1208,6 +1395,44 @@ if (!$lastDnsCheck || (time() - strtotime($lastDnsCheck)) > 300) {
     
     $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('last_global_dns_sync_check', NOW())")->execute();
     echo "Mantenimiento DNS completado.\n";
+}
+
+// --- Mantenimiento Periodico: Auditoria de nombres del certificado (cada 24h) ---
+// Un certificado se queda "cojo" (tipicamente sin www) cuando el DNS de ese subdominio
+// aun no habia propagado al emitirlo: la tarea se cerraba con exito y nadie volvia a
+// revisarlo. Aqui se detecta y se reencola el SSL; el comando ya lleva --expand, asi
+// que certbot amplia el certificado existente sin esperar a la renovacion.
+// Cadencia diaria a proposito: un intento al dia por dominio no acerca a los limites
+// de Let's Encrypt aunque la validacion falle de forma persistente.
+$lastSslAudit = $pdo->query("SELECT setting_value FROM sys_settings WHERE setting_key = 'last_ssl_san_audit'")->fetchColumn();
+if (!$lastSslAudit || (time() - strtotime($lastSslAudit)) > 86400) {
+    echo "Iniciando auditoria de nombres en certificados SSL...\n";
+    $auditIP = getPublicIP();
+
+    if ($auditIP) {
+        $sslSites = $pdo->query("SELECT domain FROM sys_sites WHERE status = 'active' AND ssl_enabled = 1")->fetchAll();
+        foreach ($sslSites as $sslSite) {
+            $auditDomain = $sslSite['domain'];
+            $missing = getMissingCertNames($auditDomain, $auditIP);
+            if (empty($missing)) continue;
+
+            // No duplicar si ya hay SSL en cola o ejecutandose para este dominio.
+            // JSON_EXTRACT y no LIKE: MariaDB guarda el JSON tal cual se inserto, asi
+            // que un LIKE con el formato equivocado no casaria nunca.
+            $dup = $pdo->prepare("SELECT id FROM sys_tasks WHERE task_type IN ('SSL_LETSENCRYPT', 'SSL_ISSUE_WILDCARD') AND status IN ('pending', 'running') AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.domain')) = ?");
+            $dup->execute([$auditDomain]);
+            if ($dup->fetch()) continue;
+
+            $pdo->prepare("INSERT INTO sys_tasks (task_type, payload, status) VALUES ('SSL_LETSENCRYPT', ?, 'pending')")
+                ->execute([json_encode(['domain' => $auditDomain])]);
+            echo "  $auditDomain: faltan en el certificado " . implode(', ', $missing) . " -> SSL reencolado.\n";
+        }
+    } else {
+        echo "Aviso: no se pudo determinar la IP publica, auditoria SSL omitida.\n";
+    }
+
+    $pdo->prepare("REPLACE INTO sys_settings (setting_key, setting_value) VALUES ('last_ssl_san_audit', NOW())")->execute();
+    echo "Auditoria SSL completada.\n";
 }
 ?>
 
