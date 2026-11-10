@@ -1,5 +1,8 @@
 #!/bin/bash
 # Autoupdate script for Lightweight-Hosting
+# Frozen until the tagged shared-pool release passes clean-install validation.
+echo "Lightweight-Hosting: autoupdate frozen pending shared-pool release validation." >&2
+exit 0
 
 REPO_RAW=${LWH_HOSTING_REPO_RAW:-https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main}
 VERSION_LOCK="/var/www/admin_panel/config.php"
@@ -39,7 +42,8 @@ if dpkg --compare-versions "$REMOTE_VERSION" gt "$LOCAL_VERSION"; then
     
     TEMP_INSTALL=$(mktemp /tmp/lwh-update-XXXXXXXX) || exit 1
     trap 'rm -f "$TEMP_INSTALL"' EXIT
-    curl -fsSL "$REPO_RAW/install.sh" -o "$TEMP_INSTALL" || exit 1
+    RELEASE_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/v${REMOTE_VERSION}"
+    curl -fsSL "$RELEASE_RAW/install.sh" -o "$TEMP_INSTALL" || exit 1
     
     if [ -f "$TEMP_INSTALL" ]; then
         bash -n "$TEMP_INSTALL" && bash "$TEMP_INSTALL" /update /silent || exit 1

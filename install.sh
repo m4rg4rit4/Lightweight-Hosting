@@ -1,10 +1,4 @@
 #!/bin/bash
-# Automatic and manual installer runs are frozen during shared-pool recovery.
-echo "Lightweight-Hosting: actualizaciones temporalmente suspendidas; se restaura el pool PHP compartido." >&2
-exit 75
-
-
-#!/bin/bash
 
 # ==========================================================================
 # Hosting Custom Installer - Ultra-Light Version (Debian 13)
@@ -22,7 +16,8 @@ AUTO_UPDATE=false
 FORCE_SILENT=false
 ADMIN_PATH="/var/www/admin_panel"
 ENGINE_PATH="/usr/local/bin/hosting"
-REPO_RAW=${LWH_HOSTING_REPO_RAW:-https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main}
+RELEASE_VERSION="1.4.48"
+REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/v${RELEASE_VERSION}"
 
 # Serialize nightly/manual installs with the root task worker. The worker already
 # owns this lock when invoking an update itself.
@@ -78,12 +73,7 @@ ask_input() {
 }
 
 # Obtener versión local
-if [ -f "VERSION" ]; then
-    VERSION=$(cat VERSION)
-else
-    VERSION=$(curl -fsSL "$REPO_RAW/VERSION" 2>/dev/null | tr -d '[:space:]')
-    VERSION=${VERSION:-"1.4.20"}
-fi
+VERSION="$RELEASE_VERSION"
 printf "${YELLOW}Versión del Sistema: ${NC}${GREEN}$VERSION${NC}\n"
 
 # Autocuración: Eliminar posibles configs corruptas de intentos previos

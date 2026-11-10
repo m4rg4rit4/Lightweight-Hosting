@@ -6,8 +6,9 @@ Este componente es el núcleo del ecosistema **Lightweight**.
 
 ## Estado de las actualizaciones
 
-**Instalador temporalmente bloqueado** antes de aplicar cualquier cambio. El
-canal anuncia 1.4.42 para evitar desplegar la migración experimental esta noche.
+El instalador de **v1.4.48** descarga sus componentes desde ese tag.
+Autoupdate congelado (salida 0, sin red ni instalaciones) hasta validar
+la release en host13 antes de desplegar en producción.
 
 Se restaura el modelo ligero anterior: las webs usan **un único pool PHP-FPM
 compartido como www-data**, en modo ondemand. No se crean usuarios ni pools por
@@ -26,13 +27,13 @@ anteriores. Las actualizaciones no se reanudan hasta validar el perfil compartid
 Para instalar el panel de hosting en un servidor **Debian 13** limpio, ejecuta el siguiente comando como **root**:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/v1.4.48/install.sh -o install.sh && bash install.sh
 ```
 
 Alternativamente, puedes realizar la instalación clonando el repositorio:
 
 ```bash
-git clone https://github.com/m4rg4rit4/Lightweight-Hosting.git
+git clone --branch v1.4.48 --depth 1 https://github.com/m4rg4rit4/Lightweight-Hosting.git
 cd Lightweight-Hosting
 chmod +x install.sh
 sudo ./install.sh
