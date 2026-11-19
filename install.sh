@@ -16,7 +16,7 @@ AUTO_UPDATE=false
 FORCE_SILENT=false
 ADMIN_PATH="/var/www/admin_panel"
 ENGINE_PATH="/usr/local/bin/hosting"
-RELEASE_VERSION="1.4.48"
+RELEASE_VERSION="1.4.49"
 REPO_RAW="https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/v${RELEASE_VERSION}"
 
 # Serialize nightly/manual installs with the root task worker. The worker already

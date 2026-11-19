@@ -6,7 +6,7 @@ Este componente es el núcleo del ecosistema **Lightweight**.
 
 ## Estado de las actualizaciones
 
-El instalador de **v1.4.48** descarga sus componentes desde ese tag.
+El instalador de **v1.4.49** descarga sus componentes desde ese tag.
 Autoupdate congelado (salida 0, sin red ni instalaciones) hasta validar
 la release en host13 antes de desplegar en producción.
 
@@ -27,21 +27,21 @@ anteriores. Las actualizaciones no se reanudan hasta validar el perfil compartid
 Los vhosts HTTP y HTTPS sirven el dominio principal y su alias `www`.
 LWH no añade subdominios `pma` ni `phpmyadmin`, ni los solicita en certificados.
 El gestor de bases de datos conserva sus accesos por ruta `/phpmyadmin` y `/dbadmin`.
-Este cambio del generador se incorporará a la próxima release; el tag v1.4.48
-ya publicado y la congelación de autoupdate se mantienen.
+La corrección se incluye desde v1.4.49. El tag v1.4.48 ya publicado es
+inmutable y la congelación de autoupdate se mantiene.
 
 ## 🚀 Instalación Rápida desde GitHub
 
 Para instalar el panel de hosting en un servidor **Debian 13** limpio, ejecuta el siguiente comando como **root**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/v1.4.48/install.sh -o install.sh && bash install.sh
+curl -fsSL https://raw.githubusercontent.com/m4rg4rit4/Lightweight-Hosting/v1.4.49/install.sh -o install.sh && bash install.sh
 ```
 
 Alternativamente, puedes realizar la instalación clonando el repositorio:
 
 ```bash
-git clone --branch v1.4.48 --depth 1 https://github.com/m4rg4rit4/Lightweight-Hosting.git
+git clone --branch v1.4.49 --depth 1 https://github.com/m4rg4rit4/Lightweight-Hosting.git
 cd Lightweight-Hosting
 chmod +x install.sh
 sudo ./install.sh
