@@ -22,6 +22,14 @@ internos en forma portable y no aplican retención si falla la copia nueva.
 La recuperación de las máquinas de prueba usa sus configuraciones y metadatos
 anteriores. Las actualizaciones no se reanudan hasta validar el perfil compartido.
 
+## Alias de los sitios
+
+Los vhosts HTTP y HTTPS sirven el dominio principal y su alias `www`.
+LWH no añade subdominios `pma` ni `phpmyadmin`, ni los solicita en certificados.
+El gestor de bases de datos conserva sus accesos por ruta `/phpmyadmin` y `/dbadmin`.
+Este cambio del generador se incorporará a la próxima release; el tag v1.4.48
+ya publicado y la congelación de autoupdate se mantienen.
+
 ## 🚀 Instalación Rápida desde GitHub
 
 Para instalar el panel de hosting en un servidor **Debian 13** limpio, ejecuta el siguiente comando como **root**:

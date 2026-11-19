@@ -110,9 +110,8 @@ function getCertNames($domain) {
 }
 
 /**
- * De los subdominios que el panel siempre sirve (www, pma, phpmyadmin), cuales
- * apuntan ya a nuestra IP pero NO estan en el certificado. Si el certificado es
- * wildcard no falta ninguno.
+ * Comprueba si el alias www apunta a nuestra IP pero falta en el certificado.
+ * Un certificado wildcard ya cubre ese nombre.
  */
 function getMissingCertNames($domain, $publicIP) {
     $certNames = getCertNames($domain);
@@ -120,7 +119,7 @@ function getMissingCertNames($domain, $publicIP) {
     if (in_array("*.$domain", $certNames)) return [];
 
     $missing = [];
-    foreach (['www', 'pma', 'phpmyadmin'] as $sub) {
+    foreach (['www'] as $sub) {
         $fqdn = "$sub.$domain";
         if (in_array($fqdn, $certNames)) continue;
         if (checkExternalDNS($fqdn, $publicIP)) $missing[] = $fqdn;
@@ -155,17 +154,12 @@ function generateVhost($domain, $document_root, $php_enabled, $php_v, $is_ssl = 
     $port = $is_ssl ? 443 : 80;
     $vhost = "<VirtualHost *:$port>\n";
     $vhost .= "    ServerName $domain\n";
-    $vhost .= "    ServerAlias www.$domain pma.$domain phpmyadmin.$domain\n";
+    $vhost .= "    ServerAlias www.$domain\n";
     $vhost .= "    DocumentRoot $document_root\n";
     $vhost .= "    DirectoryIndex index.php index.html\n";
     $vhost .= "    ErrorLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_error.log\n";
     $vhost .= "    CustomLog \${APACHE_LOG_DIR}/" . ($is_ssl ? "ssl_" : "") . "{$domain}_access.log combined\n\n";
     
-    // Soporte para subdominios mágicos phpmyadmin.dominio.com -> /phpmyadmin
-    $vhost .= "    RewriteEngine On\n";
-    $vhost .= "    RewriteCond %{HTTP_HOST} ^(pma|phpmyadmin)\. [NC]\n";
-    $vhost .= "    RewriteRule ^/(.*)$ /phpmyadmin/$1 [L,PT]\n\n";
-
     $vhost .= "    <Directory $document_root>\n";
     $vhost .= "        Options -Indexes +FollowSymLinks\n";
     $vhost .= "        AllowOverride All\n";
@@ -406,8 +400,6 @@ foreach ($tasks as $task) {
             $dnsOk = checkExternalDNS($domain, $publicIP);
             // Comprobamos www explícitamente con DNS de Google
             $dnsWwwOk = checkExternalDNS("www." . $domain, $publicIP);
-            $dnsPmaOk = checkExternalDNS("pma." . $domain, $publicIP);
-            $dnsPmaFullOk = checkExternalDNS("phpmyadmin." . $domain, $publicIP);
 
             if (!$dnsOk) {
                 // Controlar los intentos para evitar un bucle infinito
@@ -447,8 +439,6 @@ foreach ($tasks as $task) {
             
             // Subdominios adicionales si las DNS apuntan a nuestra IP
             if ($dnsWwwOk) $domainsArg .= " -d " . escapeshellarg("www.$domain");
-            if ($dnsPmaOk) $domainsArg .= " -d " . escapeshellarg("pma.$domain");
-            if ($dnsPmaFullOk) $domainsArg .= " -d " . escapeshellarg("phpmyadmin.$domain");
             
             // Usamos --keep-until-expiring y --expand para que si hay nuevos dominios se añadan, y si no, no se renueve innecesariamente
             // --cert-name fija el lineage a /etc/letsencrypt/live/$domain: sin el, un
